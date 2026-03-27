@@ -1,0 +1,62 @@
+{
+  "name": "billing-software",
+  "version": "1.0.0",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix frontend\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "npm run build --prefix frontend && electron-builder",
+    "build:win": "npm run build --prefix frontend && electron-builder --win",
+    "build:dir": "npm run build --prefix frontend && electron-builder --dir",
+    "build:no-sign": "set CSC_IDENTITY_AUTO_DISCOVERY=false && npm run build --prefix frontend && electron-builder --dir",
+    "build:clean": "powershell -Command \"if (Test-Path dist-electron) { Remove-Item -Recurse -Force dist-electron }\" && npm run build:dir"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Billing Software for Album Designer Companies",
+  "build": {
+    "appId": "com.billing.software",
+    "productName": "Billing Software",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*",
+      "package.json",
+      "!frontend/node_modules/**/*",
+      "!frontend/src/**/*",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "sign": false,
+      "verifyUpdateCodeSignature": false,
+      "signingHashAlgorithms": []
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "dependencies": {
+    "html2pdf.js": "^0.14.0",
+    "pdfkit": "^0.17.2",
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "electron": "^39.2.7",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^9.0.3"
+  }
+}

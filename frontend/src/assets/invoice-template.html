@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Tax Invoice</title>
+    <style>
+        @page {
+            margin: 2cm 2cm 3cm 2cm;
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            font-size: 13px;
+            color: #333;
+            line-height: 1.5;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1cm;
+        }
+
+        .header-left {
+            width: 60%;
+        }
+
+        .logo {
+            height: 150px;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .company-info {
+            line-height: 1.4;
+        }
+
+        .invoice-meta {
+            text-align: right;
+            
+        }
+
+        .invoice-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .recipient {
+            margin-bottom: 1cm;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 1.5cm;
+        }
+
+        th,
+        td {
+            border-top: 1px solid #ddd;
+            padding: 6px 4px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        td:nth-child(3),
+        td:nth-child(4),
+        td:nth-child(5) {
+            text-align: right;
+        }
+
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+
+        .summary-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1cm;
+        }
+
+        .qr-section {
+            width: 30%;
+        }
+
+        .qr-code {
+            width: 120px;
+            height: 120px;
+            object-fit: contain;
+        }
+
+        .totals {
+            width: 40%;
+        }
+
+        /* .totals {
+            width: 40%;
+            float: right;
+            margin-bottom: 0.5cm;
+        }
+
+        .totals td {
+            padding: 4px 0;
+        } */
+
+        .bottom-container {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 1.5cm;
+            margin-bottom: 1.5cm;
+            page-break-inside: avoid;
+        }
+
+        .sender-details,
+        .bank-info {
+            width: 48%;
+        }
+
+        .bank-info {
+            text-align: right;
+        }
+
+        .notes {
+            clear: both;
+            margin-bottom: 1.5cm;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <div class="header-left">
+            <img class="logo" src="{{LOGO_URL}}" alt="logo-img">
+            <!-- <div class="company-info"><strong>{{COMPANY_NAME}}</strong><br>{{company_address}}</div> -->
+        </div>
+        <div class="invoice-meta">
+            <div class="invoice-title">Invoice</div>
+            <div><strong>Bill No.:</strong>{{BILL_NO}}</div>
+            <div><strong>Date:</strong>{{BILL_DATE}}</div>
+            <!-- <div><strong>Due Date:</strong> 2025-10-24</div> -->
+        </div>
+    </div>
+
+    <div class="recipient">
+        {{CUSTOMER_INFO}}
+        <!-- <br>Tax ID: Tax ID -->
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width:5%">#</th>
+                <th>Description</th>
+                <th style="width:10%; text-align: right;">Qty</th>
+                <th style="width:15%; text-align: right;">Unit Price</th>
+                <th style="width:15%; text-align: right;">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{ITEMS_ROWS}}
+        </tbody>
+    </table>
+
+    <div class="summary-section">
+        <div class="qr-section">
+            <img src="{{GPAY_QR_CODE}}" alt="QR Code" class="qr-code">
+        </div>
+
+        <div class="totals">
+            <table>
+                <tr>
+                    <td>Subtotal:</td>
+                    <td style="text-align:right;">{{BILL_AMOUNT}}</td>
+                </tr>
+                <tr>
+                    <td>Outstanding Amount</td>
+                    <td style="text-align:right;">{{OUTSTANDING_AMOUNT}}</td>
+                </tr>
+                <tr>
+                    <td><strong>Total:</strong></td>
+                    <td style="text-align:right;"><strong>{{NET_PAYABLE}}</strong></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- <div class="notes">
+        It was a pleasure doing business with you.
+    </div> -->
+
+    <div class="bottom-container">
+        <div class="sender-details">
+            <strong>{{COMPANY_NAME}}</strong><br>
+            {{company_address}}<br>
+            <!-- Tax ID: Tax ID<br> -->
+            Phone: {{company_phone}}<br>
+            Email: {{company_email}}
+        </div>
+    </div>
+</body>
+
+</html>

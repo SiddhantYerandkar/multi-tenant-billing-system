@@ -44,7 +44,7 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
     // Check if file is Excel format
     const validExtensions = ['.xlsx', '.xls', '.csv']
     const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase()
-    
+
     if (!validExtensions.includes(fileExtension)) {
       alert('Please upload a valid Excel file (.xlsx, .xls, or .csv)')
       return
@@ -58,14 +58,14 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
       try {
         const data = new Uint8Array(e.target.result)
         const workbook = XLSX.read(data, { type: 'array' })
-        
+
         // Get first sheet
         const firstSheetName = workbook.SheetNames[0]
         const worksheet = workbook.Sheets[firstSheetName]
-        
+
         // Convert to JSON
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 })
-        
+
         if (jsonData.length === 0) {
           alert('The Excel file appears to be empty')
           return
@@ -74,13 +74,13 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
         // Extract column names from first row
         const columns = jsonData[0] || []
         const columnsFiltered = columns.filter(col => col !== null && col !== undefined && col !== '')
-        
+
         // Get data rows (skip header)
         const dataRows = jsonData.slice(1).filter(row => row.some(cell => cell !== null && cell !== undefined && cell !== ''))
-        
+
         setExcelColumns(columnsFiltered)
         setExcelData(dataRows)
-        
+
         // Initialize column mappings with auto-detection
         const initialMappings = {}
         const fieldLabels = {
@@ -88,9 +88,11 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
           'Phone Number': ['phone', 'phone number', 'mobile', 'contact', 'tel'],
           'Address': ['address', 'street', 'street address'],
           'City': ['city'],
-          'Email Address': ['email', 'email address', 'e-mail']
+          'Email Address': ['email', 'email address', 'e-mail'],
+          'Opening Balance': ['opening balance', 'balance', 'amount', 'op balance'],
+          'Balance Type': ['type', 'dr/cr', 'balance type', 'dr', 'cr']
         }
-        
+
         columnsFiltered.forEach((col, index) => {
           const colLower = String(col).toLowerCase().trim()
           Object.keys(fieldLabels).forEach(field => {
@@ -101,9 +103,9 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
             }
           })
         })
-        
+
         setColumnMappings(initialMappings)
-        
+
         // Set preview data from first data row
         const preview = {}
         Object.keys(fieldLabels).forEach(field => {
@@ -113,7 +115,7 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
           }
         })
         setPreviewData(preview)
-        
+
         // Move to mapping step
         setStep(2)
       } catch (error) {
@@ -121,7 +123,7 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
         alert('Error reading Excel file. Please make sure it is a valid Excel file.')
       }
     }
-    
+
     reader.readAsArrayBuffer(file)
   }
 
@@ -130,7 +132,7 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
       ...prev,
       [field]: excelColumn
     }))
-    
+
     // Update preview
     if (excelColumn && excelData.length > 0) {
       const colIndex = excelColumns.indexOf(excelColumn)
@@ -157,10 +159,10 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
       try {
         return await fn()
       } catch (error) {
-        const isRateLimit = error.message?.toLowerCase().includes('rate limit') || 
-                          error.message?.toLowerCase().includes('rate_limit') ||
-                          error.code === 429
-        
+        const isRateLimit = error.message?.toLowerCase().includes('rate limit') ||
+          error.message?.toLowerCase().includes('rate_limit') ||
+          error.code === 429
+
         if (isRateLimit && attempt < maxRetries - 1) {
           // Exponential backoff: 1s, 2s, 4s
           const delayMs = baseDelay * Math.pow(2, attempt)
@@ -199,7 +201,7 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
     // Process each row with delays to avoid rate limiting
     for (let i = 0; i < excelData.length; i++) {
       const row = excelData[i]
-      
+
       try {
         // Map Excel columns to data fields
         const nameColIndex = excelColumns.indexOf(columnMappings['Party Name'])
@@ -227,6 +229,35 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
         const city = cityColIndex >= 0 && row[cityColIndex] ? String(row[cityColIndex]).trim() : ''
         const email = emailColIndex >= 0 && row[emailColIndex] ? String(row[emailColIndex]).trim() : ''
 
+        const openingBalanceColIndex = excelColumns.indexOf(columnMappings['Opening Balance'] || '')
+        const balanceTypeColIndex = excelColumns.indexOf(columnMappings['Balance Type'] || '')
+
+        // parse opening balance safely
+        let openingBalance = 0
+        if (openingBalanceColIndex >= 0 && row[openingBalanceColIndex]) {
+          const raw = String(row[openingBalanceColIndex]).replace(/[^0-9.-]/g, '')
+          openingBalance = Number(raw)
+        }
+        if (isNaN(openingBalance)) openingBalance = 0
+
+        // parse balance type
+        let balanceType = balanceTypeColIndex >= 0 && row[balanceTypeColIndex]
+          ? String(row[balanceTypeColIndex]).trim().toUpperCase()
+          : 'DR'
+
+        // normalize DR/CR
+        if (['CR', 'CREDIT'].includes(balanceType)) {
+          balanceType = 'CR'
+        } else {
+          balanceType = 'DR'
+        }
+
+        // auto-detect if negative
+        if (openingBalance < 0) {
+          openingBalance = Math.abs(openingBalance)
+          balanceType = 'CR'
+        }
+
         // Combine address and city if both exist
         let fullAddress = address
         if (city) {
@@ -234,7 +265,7 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
         }
 
         // Generate party code
-        const partyCode = `P${String(startingCodeNum + successCount).padStart(3, '0')}`
+        const partyCode = `P${String(startingCodeNum + i).padStart(3, '0')}`
 
         // Create party in database with retry logic for rate limits
         await retryWithBackoff(async () => {
@@ -243,6 +274,8 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
             phone: phone || undefined,
             address: fullAddress || undefined,
             email: email || undefined,
+            openingBalance,
+            balanceType,
             partyCode,
             companyId: company.$id,
             isActive: true
@@ -259,19 +292,19 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
       } catch (error) {
         skippedCount++
         const errorMessage = error.message || 'Failed to import this row.'
-        const isRateLimit = errorMessage.toLowerCase().includes('rate limit') || 
-                           errorMessage.toLowerCase().includes('rate_limit') ||
-                           error.code === 429
-        
+        const isRateLimit = errorMessage.toLowerCase().includes('rate limit') ||
+          errorMessage.toLowerCase().includes('rate_limit') ||
+          error.code === 429
+
         errors.push({
           icon: 'error',
           title: `Row ${i + 2}: Import Failed`,
-          description: isRateLimit 
+          description: isRateLimit
             ? 'Rate limit exceeded. Please try importing again later or import in smaller batches.'
             : errorMessage
         })
         console.error(`Error importing row ${i + 2}:`, error)
-        
+
         // If we hit a rate limit, add a longer delay before continuing
         if (isRateLimit) {
           console.log('Rate limit detected. Waiting 5 seconds before continuing...')
@@ -283,7 +316,7 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
     setIsImporting(false)
     setImportStats({ success: successCount, skipped: skippedCount })
     setImportErrors(errors)
-    
+
     // Call onImportComplete callback to refresh parties list
     if (onImportComplete) {
       onImportComplete()
@@ -300,10 +333,10 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
 
   const handleDownloadErrors = () => {
     // Create error log content
-    const errorLog = importErrors.map((err, idx) => 
+    const errorLog = importErrors.map((err, idx) =>
       `${idx + 1}. ${err.title}\n   ${err.description}`
     ).join('\n\n')
-    
+
     const blob = new Blob([errorLog], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -360,7 +393,7 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
             {step === 1 ? 'Import Parties – Upload File' : 'Import Parties – Map Columns'}
           </h1>
           <p className="text-[#658286] dark:text-[#a1b3b5] mt-1">
-            {step === 1 
+            {step === 1
               ? 'Upload your Excel file to begin importing parties.'
               : 'Align your Excel columns with the software\'s internal fields.'}
           </p>
@@ -382,8 +415,8 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
           </div>
 
           <div className="h-2 bg-[#dce4e5] dark:bg-[#3f4a4d] rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-primary transition-all" 
+            <div
+              className="h-full bg-primary transition-all"
               style={{ width: step === 1 ? '0%' : step === 2 ? '25%' : step === 3 ? '50%' : '100%' }}
             />
           </div>
@@ -396,7 +429,7 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
               <div className="size-20 bg-primary/10 rounded-full flex items-center justify-center mb-6">
                 <span className="material-symbols-outlined text-primary text-4xl">upload_file</span>
               </div>
-              
+
               <h3 className="text-xl font-bold mb-2">Upload Excel File</h3>
               <p className="text-sm text-[#658286] dark:text-[#a1b3b5] mb-6 text-center max-w-md">
                 Select an Excel file (.xlsx, .xls, or .csv) containing your party data
@@ -451,49 +484,65 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
             <TableHeader />
 
             <div className="flex-1 overflow-y-auto custom-scrollbar">
-              <MappingRow 
-                label="Party Name" 
-                required 
+              <MappingRow
+                label="Party Name"
+                required
                 preview={previewData['Party Name'] || ''}
                 excelColumns={excelColumns}
                 selectedColumn={columnMappings['Party Name'] || ''}
                 onMappingChange={(col) => handleMappingChange('Party Name', col)}
               />
-              <MappingRow 
-                label="Phone Number" 
+              <MappingRow
+                label="Phone Number"
                 preview={previewData['Phone Number'] || ''}
                 excelColumns={excelColumns}
                 selectedColumn={columnMappings['Phone Number'] || ''}
                 onMappingChange={(col) => handleMappingChange('Phone Number', col)}
               />
-              <MappingRow 
-                label="Address" 
+              <MappingRow
+                label="Address"
                 preview={previewData['Address'] || ''}
                 excelColumns={excelColumns}
                 selectedColumn={columnMappings['Address'] || ''}
                 onMappingChange={(col) => handleMappingChange('Address', col)}
               />
-              <MappingRow 
-                label="City" 
+              <MappingRow
+                label="City"
                 preview={previewData['City'] || ''}
                 excelColumns={excelColumns}
                 selectedColumn={columnMappings['City'] || ''}
                 onMappingChange={(col) => handleMappingChange('City', col)}
               />
-              <MappingRow 
-                label="Email Address" 
+              <MappingRow
+                label="Email Address"
                 preview={previewData['Email Address'] || ''}
                 excelColumns={excelColumns}
                 selectedColumn={columnMappings['Email Address'] || ''}
                 onMappingChange={(col) => handleMappingChange('Email Address', col)}
               />
+              <MappingRow
+                label="Opening Balance"
+                preview={previewData['Opening Balance'] || ''}
+                excelColumns={excelColumns}
+                selectedColumn={columnMappings['Opening Balance'] || ''}
+                onMappingChange={(col) => handleMappingChange('Opening Balance', col)}
+              />
+
+              <MappingRow
+                label="Balance Type"
+                preview={previewData['Balance Type'] || ''}
+                excelColumns={excelColumns}
+                selectedColumn={columnMappings['Balance Type'] || ''}
+                onMappingChange={(col) => handleMappingChange('Balance Type', col)}
+              />
+
             </div>
 
             {/* INFO BAR */}
             <div className="p-4 bg-[#fafbfc] dark:bg-[#2d353b] border-t border-[#dce4e5] dark:border-[#3f4a4d] flex items-center gap-2">
               <span className="material-symbols-outlined text-primary">info</span>
               <p className="text-xs text-[#658286] dark:text-[#a1b3b5]">
-                {excelFile 
+                {excelFile
                   ? `We automatically matched columns from "${excelFile.name}". Please review them before proceeding.`
                   : 'We automatically matched most columns. Please review them before proceeding.'}
               </p>
@@ -523,7 +572,7 @@ export default function ImportPartiesModal({ isOpen, onClose, company, onImportC
           )}
 
           {step === 2 && (
-            <button 
+            <button
               onClick={handleStartImport}
               disabled={isImporting}
               className="flex items-center gap-2 px-8 py-3 rounded-lg bg-primary text-white text-sm font-bold hover:bg-primary/90 shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
@@ -562,9 +611,9 @@ function Step({ label, active }) {
       <div
         className={`size-6 rounded-full flex items-center justify-center text-xs font-bold
         ${active
-          ? "bg-primary text-white ring-4 ring-primary/20"
-          : "bg-gray-300 dark:bg-gray-600 text-white"
-        }`}
+            ? "bg-primary text-white ring-4 ring-primary/20"
+            : "bg-gray-300 dark:bg-gray-600 text-white"
+          }`}
       >
         •
       </div>
@@ -596,7 +645,7 @@ function MappingRow({ label, preview, required, excelColumns, selectedColumn, on
       </div>
 
       <div className="col-span-4 pr-12">
-        <select 
+        <select
           value={selectedColumn}
           onChange={(e) => onMappingChange(e.target.value)}
           className="w-full h-11 rounded-lg border border-[#dce4e5] dark:border-[#3f4a4d] bg-white dark:bg-[#1a1f24] text-sm focus:border-primary focus:ring-primary px-3 outline-none"

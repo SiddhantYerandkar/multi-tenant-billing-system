@@ -10,7 +10,7 @@ export default function Login() {
         try {
             setLoading(true)
             await login(email, password)
-            window.location.reload()
+            window.location.href = "/"
         } catch (err) {
             alert("Invalid credentials")
         } finally {

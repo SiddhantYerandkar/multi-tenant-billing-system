@@ -1,101 +1,113 @@
-import { databases } from "./appwrite"
-import { ID, Query } from "appwrite"
-
-const DB_ID = "billing_db"
+import { Query, createDocument, deleteDocument, getDocument, listDocuments } from "./dbService"
 const COLLECTION = "parties"
+const API_URL = import.meta.env.VITE_API_URL
 
-export async function getParties(companyId) {
-    let allParties = []
-    let offset = 0
-    const limit = 100 // Appwrite max limit per request
-    
-    // Fetch all parties using pagination
-    while (true) {
-        const response = await databases.listDocuments(
-            DB_ID, 
-            COLLECTION, 
-            [
-                Query.equal("companyId", companyId),
-                Query.equal("isActive", true),
-                Query.limit(limit),
-                Query.offset(offset)
-            ]
-        )
-        
-        allParties = [...allParties, ...response.documents]
-        
-        // If we got fewer documents than the limit, we've reached the end
-        if (response.documents.length < limit) {
-            break
+function getToken() {
+    return localStorage.getItem("token")
+}
+
+export async function getParties({ page = 1, limit = 20 } = {}) {
+    const res = await fetch(
+        `${API_URL}/parties?page=${page}&limit=${limit}`,
+        {
+            headers: {
+                Authorization: `Bearer ${localStorage.getItem("token")}`,
+                "x-company-id": localStorage.getItem("companyId"),
+            },
         }
-        
-        offset += limit
+    );
+
+    const data = await res.json();
+
+    if (!res.ok) {
+        throw new Error(data.message || "Failed to fetch parties");
     }
-    
-    return { documents: allParties }
+
+    return data;
 }
 
-export async function getAllParties(companyId) {
-    let allParties = []
-    let offset = 0
-    const limit = 100 // Appwrite max limit per request
-    
-    // Fetch all parties using pagination
-    while (true) {
-        const response = await databases.listDocuments(
-            DB_ID, 
-            COLLECTION, 
-            [
-                Query.equal("companyId", companyId),
-                Query.limit(limit),
-                Query.offset(offset)
-            ]
-        )
-        
-        allParties = [...allParties, ...response.documents]
-        
-        // If we got fewer documents than the limit, we've reached the end
-        if (response.documents.length < limit) {
-            break
+export async function getAllParties({ page = 1, limit = 20 } = {}) {
+    const res = await fetch(
+        `${API_URL}/parties?page=${page}&limit=${limit}`,
+        {
+            headers: {
+                Authorization: `Bearer ${localStorage.getItem("token")}`,
+                "x-company-id": localStorage.getItem("companyId"),
+            },
         }
-        
-        offset += limit
+    );
+
+    const data = await res.json();
+
+    if (!res.ok) {
+        throw new Error(data.message || "Failed to fetch parties");
     }
-    
-    return { documents: allParties }
+
+    return data;
 }
 
-export function addParty(data) {
-    return databases.createDocument(DB_ID, COLLECTION, ID.unique(), data)
+export async function addParty(data) {
+    console.log("Adding party with data:", data)
+    const res = await fetch(`${API_URL}/parties`, {
+        method: 'POST',
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${getToken()}`,
+            "x-company-id": localStorage.getItem("companyId")
+        },
+        body: JSON.stringify(data)
+    })
+
+    const responseData = await res.json()
+
+    if (!responseData.success) {
+        throw new Error(responseData.message || "Failed to create party")
+    }
+
+    return responseData
 }
 
-export function deleteParty(id) {
-    return databases.deleteDocument(DB_ID, COLLECTION, id)
+export async function deleteParty(id) {
+    const res = await fetch(`${API_URL}/parties/${id}`, {
+        method: 'DELETE',
+        headers: {
+            "Authorization": `Bearer ${getToken()}`,
+            "x-company-id": localStorage.getItem("companyId")
+        }
+    })
+
+    const responseData = await res.json()
+
+    if (!responseData.success) {
+        throw new Error(responseData.message || "Failed to delete party")
+    }
+
+    return responseData
 }
 
 export async function generatePartyCode(companyId) {
     const res = await getAllParties(companyId)
-    const parties = res.documents
-    
+    const parties = res.data
+    console.log("Existing parties for code generation:", parties)
     if (parties.length === 0) {
         return "P001"
     }
-    
+
     // Extract numeric part from existing codes (e.g., "P001" -> 1)
     const codes = parties
-        .map(p => p.partyCode)
+        .map(p => p.party_code)
         .filter(code => code && code.match(/^P\d+$/))
         .map(code => parseInt(code.substring(1)))
-    
+
     if (codes.length === 0) {
         return "P001"
     }
-    
+
     const maxCode = Math.max(...codes)
     const nextCode = maxCode + 1
     return `P${String(nextCode).padStart(3, "0")}`
 }
 
 export function getParty(companyId, partyId) {
-    return databases.getDocument(DB_ID, COLLECTION, partyId)
+    return getDocument(COLLECTION, partyId)
 }

@@ -1,7 +1,4 @@
-import { databases } from "./appwrite"
-import { ID, Query } from "appwrite"
-
-const DB_ID = "billing_db"
+import { Query, createDocument, deleteDocument, getDocument, listDocuments, updateDocument } from "./dbService"
 const COLLECTION = "purchases"
 
 /**
@@ -13,8 +10,7 @@ export async function getPurchases(companyId) {
   const limit = 100
 
   while (true) {
-    const response = await databases.listDocuments(
-      DB_ID,
+    const response = await listDocuments(
       COLLECTION,
       [
         Query.equal("companyId", companyId),
@@ -32,7 +28,7 @@ export async function getPurchases(companyId) {
 
     offset += limit
   }
-
+  console.log("Fetched purchases:", allPurchases)
   return { documents: allPurchases }
 }
 
@@ -45,8 +41,7 @@ export async function getPurchasesForSupplier(companyId, supplierId) {
   const limit = 100
 
   while (true) {
-    const response = await databases.listDocuments(
-      DB_ID,
+    const response = await listDocuments(
       COLLECTION,
       [
         Query.equal("companyId", companyId),
@@ -73,43 +68,27 @@ export async function getPurchasesForSupplier(companyId, supplierId) {
  * Get a single purchase by ID
  */
 export function getPurchase(purchaseId) {
-  return databases.getDocument(DB_ID, COLLECTION, purchaseId)
+  return getDocument(COLLECTION, purchaseId)
 }
 
 /**
  * Create a new purchase
  */
 export function createPurchase(data) {
-  return databases.createDocument(DB_ID, COLLECTION, ID.unique(), data)
+  return createDocument(COLLECTION, data)
 }
 
 /**
  * Update purchase
  */
 export function updatePurchase(purchaseId, data) {
-  return databases.updateDocument(DB_ID, COLLECTION, purchaseId, data)
+  return updateDocument(COLLECTION, purchaseId, data)
 }
 
 /**
  * Delete purchase (only if no payments linked)
  */
-export async function deletePurchase(purchaseId, companyId) {
+export async function deletePurchase(purchaseId) {
   // Check if any payments are linked to this purchase
-  const { databases: db } = await import("./appwrite")
-  const paymentsRes = await db.listDocuments(
-    DB_ID,
-    "supplier_payments",
-    [
-      Query.equal("companyId", companyId),
-      Query.equal("referenceType", "purchase"),
-      Query.equal("referenceId", purchaseId),
-      Query.equal("reversed", false)
-    ]
-  )
-
-  if (paymentsRes.total > 0) {
-    throw new Error("Cannot delete purchase with linked payments. Reverse payments first.")
-  }
-
-  return databases.deleteDocument(DB_ID, COLLECTION, purchaseId)
+  return deleteDocument(COLLECTION, purchaseId)
 }

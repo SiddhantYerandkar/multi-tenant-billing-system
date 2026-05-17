@@ -3,11 +3,7 @@ import Login from "./pages/Login"
 import CompanySetup from "./pages/CompanySetup"
 import Layout from "./components/Layout"
 import { getCurrentUser } from "./services/authService"
-import { databases } from "./services/appwrite"
-import { Query } from "appwrite"
-
-const DB_ID = "billing_db"
-const COMPANY_COLLECTION = "companies"
+import { getMyCompany } from "./services/companyService"
 
 export default function App() {
   const [loading, setLoading] = useState(true)
@@ -20,21 +16,21 @@ export default function App() {
         const userData = await getCurrentUser()
         setUser(userData)
 
-        const res = await databases.listDocuments(
-          DB_ID,
-          COMPANY_COLLECTION,
-          [Query.equal("ownerId", userData.$id)]
-        )
-
-        if (res.total > 0) {
-          setCompany(res.documents[0])
+        const companyRes = await getMyCompany()
+        if (companyRes?.success && companyRes?.data) {
+          setCompany(companyRes.data)
+        } else {
+          setCompany(null)
         }
-      } catch {
+
+      } catch (err) {
+        console.log(err)
         setUser(null)
       } finally {
         setLoading(false)
       }
     }
+
     boot()
   }, [])
 

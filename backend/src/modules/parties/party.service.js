@@ -1,15 +1,27 @@
 const pool = require("@config/db");
 
 // GET ALL PARTIES
-const getParties = async (companyId) => {
-    const result = await pool.query(
+const getParties = async (companyId, limit, offset) => {
+    const dataQuery = await pool.query(
         `SELECT * FROM parties 
          WHERE company_id = $1 AND is_active = true
-         ORDER BY created_at DESC`,
+         ORDER BY created_at DESC
+         LIMIT $2 OFFSET $3`,
+        [companyId, limit, offset]
+    );
+
+    const countQuery = pool.query(
+        `SELECT COUNT(*) FROM parties 
+         WHERE company_id = $1 AND is_active = true`,
         [companyId]
     );
 
-    return result.rows;
+    const [dataResult, countResult] = await Promise.all([dataQuery, countQuery]);
+
+    return {
+        rows: dataResult.rows,
+        total: parseInt(countResult.rows[0].count),
+    };
 };
 
 // CREATE PARTY
@@ -43,10 +55,10 @@ const createParty = async (data) => {
     return result.rows[0];
 };
 
-// SOFT DELETE
+// DELETE
 const deleteParty = async (id) => {
     await pool.query(
-        `UPDATE parties SET is_active = false WHERE id = $1`,
+        `DELETE FROM parties WHERE id = $1`,
         [id]
     );
 };

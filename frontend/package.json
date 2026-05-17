@@ -1,62 +1,36 @@
 {
-  "name": "billing-software",
-  "version": "1.0.0",
-  "main": "electron/main.js",
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run dev --prefix frontend\" \"wait-on http://localhost:5173 && electron .\"",
-    "build": "npm run build --prefix frontend && electron-builder",
-    "build:win": "npm run build --prefix frontend && electron-builder --win",
-    "build:dir": "npm run build --prefix frontend && electron-builder --dir",
-    "build:no-sign": "set CSC_IDENTITY_AUTO_DISCOVERY=false && npm run build --prefix frontend && electron-builder --dir",
-    "build:clean": "powershell -Command \"if (Test-Path dist-electron) { Remove-Item -Recurse -Force dist-electron }\" && npm run build:dir"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "Billing Software for Album Designer Companies",
-  "build": {
-    "appId": "com.billing.software",
-    "productName": "Billing Software",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "electron/**/*",
-      "frontend/dist/**/*",
-      "package.json",
-      "!frontend/node_modules/**/*",
-      "!frontend/src/**/*",
-      "!**/*.map"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "dir",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "sign": false,
-      "verifyUpdateCodeSignature": false,
-      "signingHashAlgorithms": []
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
-    }
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.100.0",
+    "appwrite": "^21.5.0",
+    "file-saver": "^2.0.5",
     "html2pdf.js": "^0.14.0",
-    "pdfkit": "^0.17.2",
-    "sqlite3": "^5.1.7"
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1",
-    "electron": "^39.2.7",
-    "electron-builder": "^25.1.8",
-    "wait-on": "^9.0.3"
+    "@eslint/js": "^9.39.1",
+    "@tailwindcss/postcss": "^4.1.18",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "autoprefixer": "^10.4.23",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.18",
+    "vite": "^7.2.4"
   }
 }

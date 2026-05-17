@@ -1,126 +1,113 @@
-import { databases } from "./appwrite"
-import { ID, Query } from "appwrite"
+import {
+    listDocuments,
+    createDocument,
+    getDocument,
+    updateDocument,
+    deleteDocument,
+    Query,
+} from "./dbService"
 
-const DB_ID = "billing_db"
-const INVOICES_COLLECTION = "invoices"
-const INVOICE_ITEMS_COLLECTION = "invoice_items"
+const COLLECTION = "invoices"
 
-export function listInvoices(companyId) {
-  return databases.listDocuments(DB_ID, INVOICES_COLLECTION, [
-    Query.equal("companyId", companyId),
-    Query.orderDesc("$createdAt"),
-  ])
-}
-
-export function getInvoice(companyId, invoiceId) {
-  return databases.getDocument(DB_ID, INVOICES_COLLECTION, invoiceId)
-}
-
-export async function createInvoice(data, items = []) {
-  const invoice = await databases.createDocument(DB_ID, INVOICES_COLLECTION, ID.unique(), data)
-  
-  // Create invoice items
-  for (const item of items) {
-    await databases.createDocument(DB_ID, INVOICE_ITEMS_COLLECTION, ID.unique(), {
-      invoiceId: invoice.$id,
-      companyId: data.companyId,
-      productId: item.productId || null,
-      productName: item.productName,
-      description: item.description || "",
-      quantity: item.quantity,
-      rate: item.rate,
-      total: item.total
-    })
-  }
-  
-  return invoice
-}
-
-export async function generateInvoiceNumber(companyId) {
-  const response = await databases.listDocuments(DB_ID, INVOICES_COLLECTION, [
-    Query.equal("companyId", companyId),
-    Query.orderDesc("$createdAt"),
-    Query.limit(100)
-  ])
-  
-  let maxNum = 0
-  for (const inv of response.documents) {
-    const match = inv.invoiceNumber?.match(/INV-(\d+)/)
-    if (match) {
-      const num = parseInt(match[1], 10)
-      if (num > maxNum) maxNum = num
-    }
-  }
-  
-  return `INV-${String(maxNum + 1).padStart(4, '0')}`
-}
-
-export function updateInvoice(id, data) {
-  return databases.updateDocument(DB_ID, INVOICES_COLLECTION, id, data)
-}
-
-export function createInvoiceItem(data) {
-  return databases.createDocument(DB_ID, INVOICE_ITEMS_COLLECTION, ID.unique(), data)
-}
-
-export function getInvoiceItems(invoiceId) {
-  return databases.listDocuments(DB_ID, INVOICE_ITEMS_COLLECTION, [
-    Query.equal("invoiceId", invoiceId),
-  ])
-}
-
-
-
-/**
- * Get all outstanding invoices (status != "paid")
- * Also includes invoices without a status field (legacy data)
- */
-export async function getOutstandingInvoices(companyId) {
-  let allInvoices = []
-  let offset = 0
-  const limit = 100
-
-  // Fetch ALL invoices first, then filter client-side
-  // This handles legacy invoices that might not have status field
-  while (true) {
-    const response = await databases.listDocuments(
-      DB_ID,
-      INVOICES_COLLECTION,
-      [
+/* ---------------- GET ALL INVOICES ---------------- */
+export async function getInvoices(companyId) {
+    const query = [
         Query.equal("companyId", companyId),
-        Query.orderDesc("invoiceDate"),
-        Query.limit(limit),
-        Query.offset(offset)
-      ]
+        Query.orderDesc("date"),
+    ]
+
+    return await listDocuments(COLLECTION, query)
+}
+
+/* ---------------- GET INVOICES BY PARTY ---------------- */
+export async function getInvoicesByParty(companyId, partyId) {
+    const query = [
+        Query.equal("companyId", companyId),
+        Query.equal("partyId", partyId),
+        Query.orderAsc("date"),
+    ]
+
+    return await listDocuments(COLLECTION, query)
+}
+
+/* ---------------- GET SINGLE INVOICE ---------------- */
+export async function getInvoiceById(invoiceId) {
+    return await getDocument(COLLECTION, invoiceId)
+}
+
+/* ---------------- CREATE INVOICE ---------------- */
+export async function createInvoice(data) {
+    const explicitStatus = String(data.status || "").toLowerCase()
+    const payload = {
+        ...data,
+        paidAmount: Number(data.paidAmount || 0),
+        totalAmount: Number(data.totalAmount || 0),
+        status:
+            explicitStatus === "cancelled"
+                ? "cancelled"
+                : calculateStatus(data.paidAmount, data.totalAmount),
+        date: data.date || new Date().toISOString(),
+    }
+
+    return await createDocument(COLLECTION, payload)
+}
+
+/* ---------------- UPDATE INVOICE ---------------- */
+export async function updateInvoice(invoiceId, data) {
+    const explicitStatus = String(data.status || "").toLowerCase()
+    const payload = {
+        ...data,
+        paidAmount: Number(data.paidAmount || 0),
+        totalAmount: Number(data.totalAmount || 0),
+        status:
+            explicitStatus === "cancelled"
+                ? "cancelled"
+                : calculateStatus(data.paidAmount, data.totalAmount),
+    }
+
+    return await updateDocument(COLLECTION, invoiceId, payload)
+}
+
+/* ---------------- DELETE ---------------- */
+export async function deleteInvoice(invoiceId) {
+    return await deleteDocument(COLLECTION, invoiceId)
+}
+
+/* ---------------- CREATE FROM ORDER ---------------- */
+export async function createInvoiceFromOrder(order) {
+    const totalAmount = order.items?.reduce(
+        (sum, i) => sum + Number(i.totalAmount),
+        0
     )
 
-    allInvoices = [...allInvoices, ...response.documents]
-
-    if (response.documents.length < limit) {
-      break
+    const payload = {
+        companyId: order.companyId,
+        orderId: order.$id || order.id,
+        partyId: order.partyId,
+        items: order.items || [],
+        totalAmount,
+        paidAmount: 0,
+        status: "unpaid",
+        invoiceNo: generateInvoiceNumber(),
+        date: new Date().toISOString(),
     }
 
-    offset += limit
-  }
+    return await createDocument(COLLECTION, payload)
+}
 
-  // Filter client-side: exclude only invoices explicitly marked as "paid"
-  // Include invoices with no status, or status other than "paid"
-  const outstandingInvoices = allInvoices.filter(invoice => {
-    // If status is explicitly "paid", exclude
-    if (invoice.status === "paid") {
-      return false
-    }
-    
-    // Calculate actual balance
-    const grandTotal = invoice.grandTotal || 0
-    const paidAmount = invoice.paidAmount || 0
-    const balanceAmount = invoice.balanceAmount !== undefined 
-      ? invoice.balanceAmount 
-      : (grandTotal - paidAmount)
-    
-    // Include if there's outstanding balance
-    return balanceAmount > 0
-  })
+/* ---------------- HELPERS ---------------- */
 
-  return { documents: outstandingInvoices }
+function calculateStatus(paid = 0, total = 0) {
+    const p = Number(paid || 0)
+    const t = Number(total || 0)
+
+    if (p <= 0) return "unpaid"
+    if (p < t) return "partial"
+    return "paid"
+}
+
+/* Simple generator (replace later with backend-safe logic) */
+export function generateInvoiceNumber() {
+    const timestamp = Date.now().toString().slice(-6)
+    return `INV-${timestamp}`
 }

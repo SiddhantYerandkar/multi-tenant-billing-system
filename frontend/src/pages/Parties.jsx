@@ -2,6 +2,8 @@ import { useEffect, useState } from "react"
 import { getParties, addParty, deleteParty, generatePartyCode } from "../services/partyService"
 import AddPartyModal from "../components/AddPartyModal"
 import ImportPartiesModal from "../components/ImportPartiesModal"
+import * as XLSX from "xlsx"
+import { saveAs } from "file-saver"
 
 export default function Parties({ company, onViewLedger }) {
     const [parties, setParties] = useState([])
@@ -11,32 +13,29 @@ export default function Parties({ company, onViewLedger }) {
     const [partyCode, setPartyCode] = useState(null)
     const [showImportModal, setShowImportModal] = useState(false)
     const [currentPage, setCurrentPage] = useState(1)
-    const [itemsPerPage] = useState(4)
+    const [totalPages, setTotalPages] = useState(1)
+    const [totalItems, setTotalItems] = useState(0)
 
-    async function load() {
-        const res = await getParties(company.$id)
-        setParties(res.documents)
-        setLoading(false)
-        console.log(res)
+    const itemsPerPage = 10
+
+    async function load(page = 1) {
+        setLoading(true)
+        try {
+            const res = await getParties(page, itemsPerPage)
+
+            setParties(res.data)
+            setTotalPages(res.pagination.totalPages)
+            setTotalItems(res.pagination.total)
+            setCurrentPage(page)
+        } catch (err) {
+            console.error(err)
+        } finally {
+            setLoading(false)
+        }
     }
-
     useEffect(() => {
-        load()
-    }, [])
-
-    const filteredParties = parties.filter(p =>
-        p.partyCode?.toLowerCase().includes(search.toLowerCase()) ||
-        p.name?.toLowerCase().includes(search.toLowerCase()) ||
-        p.phone?.toLowerCase().includes(search.toLowerCase())
-    )
-
-    // Pagination calculations
-    const totalPages = Math.ceil(filteredParties.length / itemsPerPage)
-    const startIndex = (currentPage - 1) * itemsPerPage
-    const endIndex = startIndex + itemsPerPage
-    const paginatedParties = filteredParties.slice(startIndex, endIndex)
-    const startEntry = filteredParties.length === 0 ? 0 : startIndex + 1
-    const endEntry = Math.min(endIndex, filteredParties.length)
+        load(currentPage)
+    }, [currentPage])
 
     // Reset to page 1 when search changes
     useEffect(() => {
@@ -44,18 +43,20 @@ export default function Parties({ company, onViewLedger }) {
     }, [search])
 
     const handlePageChange = (page) => {
-        setCurrentPage(page)
+        if (page !== '...') {
+            load(page)
+        }
     }
 
     const handlePreviousPage = () => {
         if (currentPage > 1) {
-            setCurrentPage(currentPage - 1)
+            load(currentPage - 1)
         }
     }
 
     const handleNextPage = () => {
         if (currentPage < totalPages) {
-            setCurrentPage(currentPage + 1)
+            load(currentPage + 1)
         }
     }
 
@@ -63,7 +64,7 @@ export default function Parties({ company, onViewLedger }) {
     const getPageNumbers = () => {
         const pages = []
         const maxVisiblePages = 5
-        
+
         if (totalPages <= maxVisiblePages) {
             // Show all pages if total pages is less than max visible
             for (let i = 1; i <= totalPages; i++) {
@@ -96,7 +97,7 @@ export default function Parties({ company, onViewLedger }) {
                 pages.push(totalPages)
             }
         }
-        
+
         return pages
     }
 
@@ -107,7 +108,7 @@ export default function Parties({ company, onViewLedger }) {
     }
 
     const openAddPartyModal = async () => {
-        const code = await generatePartyCode(company.$id)
+        const code = await generatePartyCode(company.id)
         setPartyCode(code)
         setShowAddPartyModal(true)
     }
@@ -115,13 +116,50 @@ export default function Parties({ company, onViewLedger }) {
     const handleAddParty = async (data) => {
         await addParty({
             ...data,
-            partyCode,
-            companyId: company.$id,
+            party_code: partyCode,
+            companyId: company.id,
+            opening_balance: data.openingBalance,
+            balance_type: data.balanceType
         });
 
         await load();
         setShowAddPartyModal(false);
     };
+
+    const handleExport = () => {
+        if (!parties.length) {
+            alert("No data to export")
+            return
+        }
+
+        // ✅ Format data for Excel
+        const formatted = parties.map((p, index) => ({
+            "Sr No": index + 1,
+            "Party Code": p.party_code || "",
+            "Name": p.name || "",
+            "Phone": p.phone || "",
+            "Address": p.address || ""
+        }))
+
+        // ✅ Create worksheet
+        const worksheet = XLSX.utils.json_to_sheet(formatted)
+
+        // ✅ Create workbook
+        const workbook = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Parties")
+
+        // ✅ Write file
+        const excelBuffer = XLSX.write(workbook, {
+            bookType: "xlsx",
+            type: "array"
+        })
+
+        const data = new Blob([excelBuffer], {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8"
+        })
+
+        saveAs(data, `Parties_${new Date().toISOString().split("T")[0]}.xlsx`)
+    }
 
     return (
         <main className="flex-1 flex flex-col overflow-hidden">
@@ -175,7 +213,10 @@ export default function Parties({ company, onViewLedger }) {
                         Filter
                     </button>
 
-                    <button className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-[#dae5e7] bg-white text-sm font-semibold">
+                    <button
+                        onClick={handleExport}
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-[#dae5e7] bg-white text-sm font-semibold"
+                    >
                         <span className="material-symbols-outlined">file_download</span>
                         Export
                     </button>
@@ -192,24 +233,25 @@ export default function Parties({ company, onViewLedger }) {
                                 <th className="px-6 py-4 text-xs font-bold uppercase">Customer Name</th>
                                 <th className="px-6 py-4 text-xs font-bold uppercase">Phone</th>
                                 <th className="px-6 py-4 text-xs font-bold uppercase">Address</th>
+                                <th className="px-6 py-4 text-xs font-bold uppercase w-24 text-right">Opening Balance</th>
                                 <th className="px-6 py-4 text-xs font-bold uppercase text-right">Actions</th>
                             </tr>
                         </thead>
 
                         <tbody className="divide-y divide-[#f0f4f5]">
-                            {!loading && filteredParties.length === 0 && (
+                            {!loading && parties.length === 0 && (
                                 <tr>
-                                    <td colSpan="5" className="p-6 text-center text-sm text-gray-500">
+                                    <td colSpan="6" className="p-6 text-center text-sm text-gray-500">
                                         No parties found
                                     </td>
                                 </tr>
                             )}
 
-                            {paginatedParties.map(party => (
-                                <tr key={party.$id} className="hover:bg-primary/5 transition">
+                            {parties.map(party => (
+                                <tr key={party.id} className="hover:bg-primary/5 transition">
                                     <td className="px-6 py-4">
                                         <span className="px-3 py-1 text-xs font-bold rounded bg-primary/10 text-primary">
-                                            {party.partyCode}
+                                            {party.party_code}
                                         </span>
                                     </td>
 
@@ -225,10 +267,23 @@ export default function Parties({ company, onViewLedger }) {
                                         {party.address || "-"}
                                     </td>
 
+                                    <td className="px-6 py-4 text-right font-mono">
+                                        <td className="px-6 py-4 text-right font-mono">
+                                            {party.opening_balance > 0 ? (
+                                                <span className={party.balance_type === "DR" ? "text-red-600" : "text-green-600"}>
+                                                    ₹{party.opening_balance.toLocaleString()} {party.balance_type}
+                                                </span>
+                                            ) : (
+                                                <span className="text-gray-400">-</span>
+                                            )}
+                                        </td>
+                                    </td>
+
                                     <td className="px-6 py-4 text-right">
                                         {onViewLedger && (
                                             <button
-                                                onClick={() => onViewLedger(party.$id)}
+
+                                                onClick={() => onViewLedger?.(party.id)}
                                                 className="p-2 text-gray-500 hover:text-primary"
                                                 title="View Ledger"
                                             >
@@ -239,7 +294,7 @@ export default function Parties({ company, onViewLedger }) {
                                             <span className="material-symbols-outlined">edit</span>
                                         </button>
                                         <button
-                                            onClick={() => handleDelete(party.$id)}
+                                            onClick={() => handleDelete(party.id)}
                                             className="p-2 text-gray-500 hover:text-red-500"
                                         >
                                             <span className="material-symbols-outlined">delete</span>
@@ -253,7 +308,7 @@ export default function Parties({ company, onViewLedger }) {
                     {/* PAGINATION FOOTER */}
                     <div className="px-6 py-4 bg-[#f0f4f5]/30 flex items-center justify-between border-t border-[#dae5e7]">
                         <p className="text-xs text-[#5e878d] font-medium">
-                            Showing {startEntry} to {endEntry} of {filteredParties.length} entries
+                            Showing page {currentPage} of {totalPages} (Total: {totalItems})
                         </p>
                         <div className="flex items-center gap-2">
                             <button
@@ -263,7 +318,7 @@ export default function Parties({ company, onViewLedger }) {
                             >
                                 <span className="material-symbols-outlined text-sm">chevron_left</span>
                             </button>
-                            
+
                             {getPageNumbers().map((page, index) => {
                                 if (page === '...') {
                                     return (
@@ -272,22 +327,21 @@ export default function Parties({ company, onViewLedger }) {
                                         </span>
                                     )
                                 }
-                                
+
                                 return (
                                     <button
                                         key={page}
                                         onClick={() => handlePageChange(page)}
-                                        className={`w-8 h-8 rounded text-xs font-bold transition-colors ${
-                                            currentPage === page
-                                                ? 'bg-primary text-white'
-                                                : 'bg-white text-[#5e878d] hover:bg-primary/5'
-                                        }`}
+                                        className={`w-8 h-8 rounded text-xs font-bold transition-colors ${currentPage === page
+                                            ? 'bg-primary text-white'
+                                            : 'bg-white text-[#5e878d] hover:bg-primary/5'
+                                            }`}
                                     >
                                         {page}
                                     </button>
                                 )
                             })}
-                            
+
                             <button
                                 onClick={handleNextPage}
                                 disabled={currentPage === totalPages || totalPages === 0}

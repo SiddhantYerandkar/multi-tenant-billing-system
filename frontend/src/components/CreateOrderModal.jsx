@@ -1,262 +1,408 @@
-import { useState, useEffect } from "react"
-import { createOrder } from "../services/orderService"
+import { useEffect, useState } from "react"
+import { getProducts } from "../services/productService"
 import { getParties } from "../services/partyService"
+import { getDynamicPricesForParty } from "../services/dynamicPricingService"
 
-const JOB_TYPES = [
-  { value: "designing", label: "Designing" },
-  { value: "printing", label: "Printing" },
-  { value: "designing_printing", label: "Designing & Printing" },
-  { value: "binding", label: "Binding" },
-  { value: "other", label: "Other" }
-]
+export default function CreateOrderModal({ open, onClose, onCreate, company }) {
 
-export default function CreateOrderModal({ open, onClose, company, onOrderCreated }) {
-  const [formData, setFormData] = useState({
-    orderNo: "",
-    partyId: "",
-    title: "",
-    jobType: "designing",
-    orderDate: new Date().toISOString().split('T')[0],
-    notes: ""
-  })
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const [parties, setParties] = useState([])
-
-  useEffect(() => {
-    if (open && company?.$id) {
-      loadData()
-    }
-  }, [open, company])
-
-  async function loadData() {
-    try {
-      const partiesRes = await getParties(company.$id)
-      setParties(partiesRes.documents || [])
-    } catch (err) {
-      console.error("Error loading data:", err)
-    }
-  }
-
-  useEffect(() => {
-    document.body.style.overflow = open ? "hidden" : ""
-    return () => (document.body.style.overflow = "")
-  }, [open])
-
-  useEffect(() => {
-    if (open) {
-      setFormData({
-        orderNo: "",
+    const [form, setForm] = useState({
+        orderDate: "",
         partyId: "",
-        title: "",
         jobType: "designing",
-        orderDate: new Date().toISOString().split('T')[0],
-        notes: ""
-      })
-      setError("")
+        orderNo: "",
+        title: ""
+    })
+
+    const [products, setProducts] = useState([])
+    const [parties, setParties] = useState([])
+    const [priceMap, setPriceMap] = useState({})
+    const [partySearch, setPartySearch] = useState("")
+    const [showPartyDropdown, setShowPartyDropdown] = useState(false)
+
+    const [items, setItems] = useState([
+        { productId: "", price: 0, quantity: 1, total: 0 }
+    ])
+
+    const [loading, setLoading] = useState(false)
+
+    /* ✅ HOOKS MUST BE HERE (always run) */
+
+    useEffect(() => {
+        if (!company?.$id || !open) return
+
+        async function load() {
+            const [prodRes, partyRes] = await Promise.all([
+                getProducts(company.$id),
+                getParties(company.$id)
+            ])
+
+            setProducts(prodRes.documents)
+            setParties(partyRes.documents)
+        }
+
+        load()
+    }, [company, open])
+
+    useEffect(() => {
+        if (!form.partyId || !open) return
+
+        async function loadPrices() {
+            const res = await getDynamicPricesForParty(company.$id, form.partyId)
+
+            const map = {}
+            res.documents.forEach(p => {
+                map[p.productId] = p.price
+            })
+
+            setPriceMap(map)
+        }
+
+        loadPrices()
+    }, [form.partyId, open])
+
+    useEffect(() => {
+        if (!form.partyId) return
+
+        const selected = parties.find(p => p.$id === form.partyId)
+        if (selected) {
+            setPartySearch(selected.name)
+        }
+    }, [form.partyId, parties])
+
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (!e.target.closest(".party-dropdown")) {
+                setShowPartyDropdown(false)
+            }
+        }
+
+        document.addEventListener("click", handleClickOutside)
+        return () => document.removeEventListener("click", handleClickOutside)
+    }, [])
+
+    /* ✅ NOW safe to conditionally render */
+    if (!open) return null
+
+
+    /* ---------------- HANDLE ITEM CHANGE ---------------- */
+    const updateItem = (index, key, value) => {
+        const updated = [...items]
+        updated[index][key] = value
+
+        if (key === "productId") {
+            const product = products.find(p => p.$id === value)
+
+            let price = 0
+
+            if (form.partyId) {
+                // dynamic price OR fallback to base price
+                price = priceMap[value] ?? product?.basePrice ?? 0
+            } else {
+                // no party → always base price
+                price = product?.basePrice ?? 0
+            }
+
+            updated[index].price = price
+        }
+
+        if (key === "quantity") {
+            updated[index].quantity = Number(value)
+        }
+
+        // recalc total
+        updated[index].total =
+            Number(updated[index].price || 0) *
+            Number(updated[index].quantity || 0)
+
+        setItems(updated)
     }
-  }, [open])
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setError("")
-
-    if (!formData.orderNo.trim()) {
-      setError("Order number is required")
-      return
+    const addItem = () => {
+        setItems(prev => [...prev, { productId: "", price: 0, quantity: 1, total: 0 }])
     }
 
-    if (!formData.partyId) {
-      setError("Please select a customer")
-      return
+    const removeItem = (index) => {
+        setItems(prev => prev.filter((_, i) => i !== index))
     }
 
-    if (!formData.title.trim()) {
-      setError("Title is required")
-      return
+    const grandTotal = items.reduce((sum, i) => sum + i.total, 0)
+
+    /* ---------------- SUBMIT ---------------- */
+    const handleSubmit = async () => {
+        if (!form.partyId) {
+            alert("Select party")
+            return
+        }
+
+        if (!form.orderNo) {
+            alert("Enter order number")
+            return
+        }
+
+        if (items.length === 0) {
+            alert("Add at least one item")
+            return
+        }
+
+        setLoading(true)
+
+        await onCreate({
+            ...form,
+            companyId: company.$id,
+            items
+        })
+
+        setLoading(false)
+        onClose()
     }
 
-    setLoading(true)
-    try {
-      await createOrder({
-        companyId: company.$id,
-        partyId: formData.partyId,
-        orderNo: formData.orderNo.trim(),
-        title: formData.title.trim(),
-        jobType: formData.jobType,
-        orderDate: formData.orderDate,
-        notes: formData.notes.trim(),
-        status: "pending",
-        jobNo: "",
-      })
+    const filteredParties = parties.filter(p =>
+        p.name?.toLowerCase().includes(partySearch.toLowerCase()) ||
+        p.partyCode?.toLowerCase().includes(partySearch.toLowerCase()) ||
+        p.phone?.toLowerCase().includes(partySearch.toLowerCase())
+    )
 
-      if (onOrderCreated) {
-        onOrderCreated()
-      }
-      onClose()
-    } catch (err) {
-      console.error("Error creating order:", err)
-      setError(err.message || "Failed to create order")
-    } finally {
-      setLoading(false)
-    }
-  }
+    return (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
 
-  if (!open) return null
+            <div className="bg-white w-full max-w-4xl rounded-xl shadow-lg">
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-[540px] bg-white rounded-xl shadow-2xl border border-[#dae5e7] overflow-hidden max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="px-6 py-5 border-b border-[#dae5e7] flex items-center justify-between sticky top-0 bg-white z-10">
-          <h2 className="text-xl font-bold">Create Order</h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <span className="material-symbols-outlined text-gray-500">close</span>
-          </button>
-        </div>
+                {/* HEADER */}
+                <div className="px-6 py-4 border-b border-[#dae5e7] flex justify-between">
+                    <h2 className="text-xl font-bold">Create Order</h2>
+                    <button onClick={onClose}>
+                        <span className="material-symbols-outlined">close</span>
+                    </button>
+                </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-              {error}
+                {/* BODY */}
+                <div className="p-6 space-y-6">
+
+                    {/* BASIC INFO */}
+                    <div className="grid grid-cols-3 gap-4">
+
+                        <Input
+                            label="Order Date"
+                            type="date"
+                            value={form.orderDate}
+                            onChange={v => setForm({ ...form, orderDate: v })}
+                        />
+
+
+                        <Input
+                            label="Title"
+                            value={form.title}
+                            onChange={v => setForm({ ...form, title: v })}
+                        />
+
+                        <Input
+                            label="Order No"
+                            value={form.orderNo}
+                            onChange={v => setForm({ ...form, orderNo: v })}
+                        />
+
+                        <div className="flex flex-col party-dropdown">
+                            <label className="text-xs font-semibold text-gray-500 mb-1">
+                                Party
+                            </label>
+
+                            {/* INPUT */}
+                            <input
+                                value={partySearch}
+                                onChange={(e) => {
+                                    setPartySearch(e.target.value)
+                                    setShowPartyDropdown(true)
+                                }}
+                                onFocus={() => setShowPartyDropdown(true)}
+                                placeholder="Search party..."
+                                className="px-3 py-2 rounded-lg border border-[#dae5e7] text-sm focus:ring-2 focus:ring-primary/50 outline-none"
+                            />
+
+                            {/* DROPDOWN */}
+                            {showPartyDropdown && (
+                                <div className="mt-1 w-full bg-white border border-[#dae5e7] rounded-lg shadow-lg max-h-30 overflow-auto">
+                                    {filteredParties.length === 0 ? (
+                                        <div className="p-3 text-sm text-gray-500">
+                                            No party found
+                                        </div>
+                                    ) : (
+                                        filteredParties.map(p => (
+                                            <div
+                                                key={p.$id}
+                                                onClick={() => {
+                                                    setForm({ ...form, partyId: p.$id })
+                                                    setPartySearch(p.name)
+                                                    setShowPartyDropdown(false)
+                                                }}
+                                                className={`px-3 py-2 cursor-pointer hover:bg-primary/10 flex flex-col ${form.partyId === p.$id ? "bg-primary/5" : ""
+                                                    }`}
+                                            >
+                                                <span className="font-medium">{p.name}</span>
+                                                <span className="text-xs text-gray-500">
+                                                    {p.partyCode} • {p.phone || "No phone"}
+                                                </span>
+                                            </div>
+                                        ))
+                                    )}
+
+                                </div>
+                            )}
+                        </div>
+
+                        <Select
+                            label="Job Type"
+                            value={form.jobType}
+                            onChange={v => setForm({ ...form, jobType: v })}
+                            options={[
+                                { label: "Designing", value: "designing" },
+                                { label: "Printing", value: "printing" }
+                            ]}
+                        />
+
+                    </div>
+
+                    {/* ITEMS */}
+                    <div className="border border-[#dae5e7] rounded-lg overflow-hidden">
+
+                        <table className="w-full text-left">
+                            <thead className="bg-[#f0f4f5]/60">
+                                <tr>
+                                    <th className="px-4 py-3 text-xs font-bold uppercase">Product</th>
+                                    <th className="px-4 py-3 text-xs font-bold uppercase">Price</th>
+                                    <th className="px-4 py-3 text-xs font-bold uppercase">Qty</th>
+                                    <th className="px-4 py-3 text-xs font-bold uppercase">Total</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+
+                            <tbody className="divide-y divide-[#f0f4f5]">
+                                {items.map((item, i) => (
+                                    <tr key={i}>
+
+                                        <td className="px-4 py-3">
+                                            <select
+                                                value={item.productId}
+                                                onChange={(e) => updateItem(i, "productId", e.target.value)}
+                                                className="w-full px-2 py-2 border rounded"
+                                            >
+                                                <option value="">Select Product</option>
+                                                {products.map(p => (
+                                                    <option key={p.$id} value={p.$id}>
+                                                        {p.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </td>
+
+                                        <td className="px-4 py-3 text-sm">
+                                            ₹{item.price}
+                                        </td>
+
+                                        <td className="px-4 py-3">
+                                            <input
+                                                type="number"
+                                                value={item.quantity}
+                                                onChange={(e) => updateItem(i, "quantity", e.target.value)}
+                                                className="w-20 px-2 py-1 border rounded"
+                                            />
+                                        </td>
+
+                                        <td className="px-4 py-3 font-medium">
+                                            ₹{item.total}
+                                        </td>
+
+                                        <td className="px-4 py-3">
+                                            <button
+                                                onClick={() => removeItem(i)}
+                                                className="text-red-500"
+                                            >
+                                                ✕
+                                            </button>
+                                        </td>
+
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+
+                        {/* ADD ITEM */}
+                        <div className="p-4">
+                            <button
+                                onClick={addItem}
+                                className="text-primary font-medium"
+                            >
+                                + Add Item
+                            </button>
+                        </div>
+
+                    </div>
+
+                    {/* TOTAL */}
+                    <div className="flex justify-end text-lg font-bold">
+                        Total: ₹{grandTotal}
+                    </div>
+
+                </div>
+
+                {/* FOOTER */}
+                <div className="px-6 py-4 border-t border-[#dae5e7] flex justify-end gap-3">
+                    <button
+                        onClick={onClose}
+                        className="px-4 py-2 border rounded-lg"
+                    >
+                        Cancel
+                    </button>
+
+                    <button
+                        onClick={handleSubmit}
+                        disabled={loading}
+                        className="px-6 py-2 bg-primary text-white rounded-lg font-bold"
+                    >
+                        {loading ? "Creating..." : "Create Order"}
+                    </button>
+                </div>
+
             </div>
-          )}
+        </div>
+    )
+}
 
-          {/* Order Number */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Order No <span className="text-red-500">*</span>
+/* ---------- SMALL COMPONENTS ---------- */
+
+function Input({ label, value, onChange, type = "text" }) {
+    return (
+        <div className="flex flex-col">
+            <label className="text-xs font-semibold text-gray-500 mb-1">
+                {label}
             </label>
             <input
-              type="text"
-              value={formData.orderNo}
-              onChange={(e) => setFormData({ ...formData, orderNo: e.target.value })}
-              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-              placeholder="ORD-0001"
-              required
+                type={type}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-[#dae5e7] text-sm focus:ring-2 focus:ring-primary/50 outline-none"
             />
-          </div>
+        </div>
+    )
+}
 
-          {/* Customer Selection */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Customer <span className="text-red-500">*</span>
+function Select({ label, value, onChange, options }) {
+    return (
+        <div className="flex flex-col">
+            <label className="text-xs font-semibold text-gray-500 mb-1">
+                {label}
             </label>
             <select
-              value={formData.partyId}
-              onChange={(e) => setFormData({ ...formData, partyId: e.target.value })}
-              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-              required
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-[#dae5e7] text-sm focus:ring-2 focus:ring-primary/50 outline-none"
             >
-              <option value="">-- Select Customer --</option>
-              {parties.map((party) => (
-                <option key={party.$id} value={party.$id}>
-                  {party.name} {party.partyCode ? `(${party.partyCode})` : ""}
-                </option>
-              ))}
+                <option value="">Select</option>
+                {options.map(opt => (
+                    <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                    </option>
+                ))}
             </select>
-          </div>
-
-          {/* Title */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Title <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-              placeholder="e.g., Wedding Card Design, Business Cards"
-              required
-            />
-          </div>
-
-          {/* Job Type */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Job Type <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={formData.jobType}
-              onChange={(e) => setFormData({ ...formData, jobType: e.target.value })}
-              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-            >
-              {JOB_TYPES.map((type) => (
-                <option key={type.value} value={type.value}>
-                  {type.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Order Date */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Order Date <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              value={formData.orderDate}
-              onChange={(e) => setFormData({ ...formData, orderDate: e.target.value })}
-              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-              required
-            />
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Notes (Optional)
-            </label>
-            <textarea
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              className="w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none resize-none"
-              rows="3"
-              placeholder="Additional notes..."
-            />
-          </div>
-
-          {/* Footer */}
-          <div className="flex justify-end gap-3 pt-4 sticky bottom-0 bg-white pb-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-6 py-2.5 text-sm font-semibold text-gray-600 hover:text-gray-800 transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-6 py-2.5 rounded-lg bg-primary hover:bg-primary/90 text-white text-sm font-bold shadow-md shadow-primary/20 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <>
-                  <span className="material-symbols-outlined animate-spin text-sm">sync</span>
-                  <span>Creating...</span>
-                </>
-              ) : (
-                <>
-                  <span className="material-symbols-outlined text-sm">add_circle</span>
-                  <span>Create Order</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
+        </div>
+    )
 }

@@ -5,10 +5,12 @@ const {
     deleteProduct,
 } = require("./product.service");
 
+
+
 // GET
 const getProductsController = async (req, res) => {
     try {
-        const companyId = req.user.companyId;
+        const companyId = req.companyId;
 
         const products = await getProducts(companyId);
 
@@ -16,6 +18,7 @@ const getProductsController = async (req, res) => {
             success: true,
             data: products,
         });
+
     } catch (err) {
         console.error(err);
         res.status(500).json({
@@ -28,7 +31,8 @@ const getProductsController = async (req, res) => {
 // CREATE
 const createProductController = async (req, res) => {
     try {
-        const companyId = req.user.companyId;
+
+        const companyId = req.companyId;
 
         const product = await createProduct({
             company_id: companyId,
@@ -78,7 +82,7 @@ const updateProductController = async (req, res) => {
 const deleteProductController = async (req, res) => {
     try {
         const { id } = req.params;
-
+        console.log("Deleting product with id:", id); // Debug log
         await deleteProduct(id);
 
         res.json({

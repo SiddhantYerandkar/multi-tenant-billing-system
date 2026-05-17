@@ -4,7 +4,7 @@ const pool = require("@config/db");
 const getProducts = async (companyId) => {
     const result = await pool.query(
         `SELECT * FROM products 
-         WHERE company_id = $1 AND is_active = true
+         WHERE company_id = $1
          ORDER BY created_at DESC`,
         [companyId]
     );
@@ -45,7 +45,7 @@ const updateProduct = async (id, data) => {
 // DELETE (SOFT)
 const deleteProduct = async (id) => {
     await pool.query(
-        `UPDATE products SET is_active = false WHERE id = $1`,
+        `DELETE FROM products WHERE id = $1`,
         [id]
     );
 };

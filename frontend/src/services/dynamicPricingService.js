@@ -1,86 +1,69 @@
-import { databases } from "./appwrite"
-import { ID, Query } from "appwrite"
-
-const DB_ID = "billing_db"
+import { Query, createDocument, deleteDocument, listDocuments, updateDocument } from "./dbService"
 const COLLECTION = "dynamic_pricing"
 
-/**
- * Get all dynamic prices for a company
- */
-export function getDynamicPrices(companyId) {
-    return databases.listDocuments(DB_ID, COLLECTION, [
-        Query.equal("companyId", companyId),
-    ])
+const API_URL = import.meta.env.VITE_API_URL
+
+function getToken() {
+    return localStorage.getItem("token")
 }
+
 
 /**
  * Get dynamic prices for a specific party
  */
-export function getDynamicPricesForParty(companyId, partyId) {
-    return databases.listDocuments(DB_ID, COLLECTION, [
-        Query.equal("companyId", companyId),
-        Query.equal("partyId", partyId),
-    ])
-}
-
-/**
- * Get dynamic price for a specific party-product combination
- */
-export async function getDynamicPrice(companyId, partyId, productId) {
-    try {
-        const res = await databases.listDocuments(DB_ID, COLLECTION, [
-            Query.equal("companyId", companyId),
-            Query.equal("partyId", partyId),
-            Query.equal("productId", productId),
-        ])
-        
-        if (res.total > 0) {
-            return res.documents[0]
+export async function getDynamicPricesForParty(companyId, partyId) {
+    const res = await fetch(
+        `${API_URL}/dynamic-pricing/party/${partyId}`,
+        {
+            method: "GET",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${getToken()}`,
+                "x-company-id": localStorage.getItem("companyId")
+            }
         }
-        return null
-    } catch (error) {
-        console.error("Error getting dynamic price:", error)
-        return null
-    }
+    )
+
+    const data = await res.json()
+    return data
 }
 
-/**
- * Set or update dynamic price for a party-product combination
- */
-export async function setDynamicPrice(companyId, partyId, productId, price) {
-    // Check if price already exists
-    const existing = await getDynamicPrice(companyId, partyId, productId)
-    
-    if (existing) {
-        // Update existing
-        return databases.updateDocument(
-            DB_ID,
-            COLLECTION,
-            existing.$id,
-            { price: Number(price) }
-        )
-    } else {
-        // Create new
-        return databases.createDocument(DB_ID, COLLECTION, ID.unique(), {
-            companyId,
+
+// UPSERT price
+export async function setDynamicPrice(partyId, productId, price) {
+    const res = await fetch(`${API_URL}/dynamic-pricing`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+            "x-company-id": localStorage.getItem("companyId")
+        },
+        body: JSON.stringify({
             partyId,
             productId,
-            price: Number(price),
+            price
         })
-    }
+    })
+
+    return res.json()
 }
 
-/**
- * Delete dynamic price for a party-product combination
- */
-export async function deleteDynamicPrice(companyId, partyId, productId) {
-    const existing = await getDynamicPrice(companyId, partyId, productId)
-    
-    if (existing) {
-        return databases.deleteDocument(DB_ID, COLLECTION, existing.$id)
-    }
-    
-    return Promise.resolve()
+// DELETE price
+export async function deleteDynamicPrice(partyId, productId) {
+    const res = await fetch(`${API_URL}/dynamic-pricing`, {
+        method: "DELETE",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+            "x-company-id": localStorage.getItem("companyId")
+        },
+        body: JSON.stringify({
+            party_id: partyId,
+            product_id: productId
+        })
+    })
+
+    return res.json()
 }
 
 /**

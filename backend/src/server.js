@@ -17,6 +17,7 @@ app.use("/api/products", require("@modules/products/product.route"));
 
 app.use("/api/parties", require("@modules/parties/party.route"));
 
+app.use("/api/dynamic-pricing", require("@modules/dynamicpricing/dynamicPricing.route"));
 
 // health check
 app.get("/", (req, res) => {

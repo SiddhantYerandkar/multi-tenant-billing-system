@@ -1,519 +1,535 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import {
+    createInvoice,
+    getInvoices,
+    updateInvoice,
+} from "../services/invoiceService"
+import { updateOrderInvoiceId } from "../services/orderService"
 import { getParties } from "../services/partyService"
-import { listInvoices, getInvoiceItems } from "../services/invoiceService"
-import CreateInvoiceModal from "../components/CreateInvoiceModal"
-import { generateInvoicePDF } from "../utils/pdfGenerator"
+import InvoiceModal from "../components/InvoiceModal"
+import { exportToXLSX } from "../utils/exportUtils"
+import * as XLSX from "xlsx"
 
-const STATUS_STYLES = {
-  paid: "bg-status-paid-bg text-status-paid-text",
-  unpaid: "bg-status-pending-bg text-status-pending-text",
-  pending: "bg-status-pending-bg text-status-pending-text",
-  partial: "bg-status-overdue-bg text-status-overdue-text",
-}
+export default function Invoices({
+    company,
+    draftFromOrder,
+    onDraftConsumed,
+    viewInvoiceIdFromOrder,
+    onViewInvoiceConsumed,
+}) {
+    const [invoices, setInvoices] = useState([])
+    const [partyMap, setPartyMap] = useState({})
+    const [loading, setLoading] = useState(true)
+    const [openModal, setOpenModal] = useState(false)
+    const [modalDraft, setModalDraft] = useState(null)
+    const [viewInvoice, setViewInvoice] = useState(null)
 
-export default function Invoices({ company, onViewInvoice }) {
-  const [parties, setParties] = useState([])
-  const [invoices, setInvoices] = useState([])
-  const [search, setSearch] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [dateRangeStart, setDateRangeStart] = useState("")
-  const [dateRangeEnd, setDateRangeEnd] = useState("")
-  const [showStatusDropdown, setShowStatusDropdown] = useState(false)
-  const [showDateRangePicker, setShowDateRangePicker] = useState(false)
-  const [showCreateInvoiceModal, setShowCreateInvoiceModal] = useState(false)
-  useEffect(() => {
-    async function load() {
-      const [partyRes, invoiceRes] = await Promise.all([
-        getParties(company.$id),
-        listInvoices(company.$id),
-      ])
-      setParties(partyRes.documents)
-      setInvoices(invoiceRes.documents)
-    }
-    load()
-  }, [])
+    const [search, setSearch] = useState("")
+    const [fromDate, setFromDate] = useState("")
+    const [toDate, setToDate] = useState("")
+    const [statusFilter, setStatusFilter] = useState("")
 
-  const partyMap = useMemo(() => {
-    const map = {}
-    parties.forEach(p => (map[p.$id] = p))
-    return map
-  }, [parties])
+    // Pagination (match Parties page style)
+    const itemsPerPage = 4
+    const [currentPage, setCurrentPage] = useState(1)
 
-  const formatDate = (dateString) => {
-    if (!dateString) return "N/A"
-    try {
-      const date = new Date(dateString)
-      return date.toLocaleDateString("en-US", { 
-        year: "numeric", 
-        month: "short", 
-        day: "numeric" 
-      })
-    } catch {
-      return dateString
-    }
-  }
+    // UI toggles
+    const [isFilterOpen, setIsFilterOpen] = useState(false)
 
-  const isDateInRange = (dateString) => {
-    if (!dateRangeStart && !dateRangeEnd) return true
-    
-    try {
-      const invoiceDate = new Date(dateString)
-      invoiceDate.setHours(0, 0, 0, 0)
-      
-      if (dateRangeStart && dateRangeEnd) {
-        const start = new Date(dateRangeStart)
-        start.setHours(0, 0, 0, 0)
-        const end = new Date(dateRangeEnd)
-        end.setHours(23, 59, 59, 999)
-        return invoiceDate >= start && invoiceDate <= end
-      } else if (dateRangeStart) {
-        const start = new Date(dateRangeStart)
-        start.setHours(0, 0, 0, 0)
-        return invoiceDate >= start
-      } else if (dateRangeEnd) {
-        const end = new Date(dateRangeEnd)
-        end.setHours(23, 59, 59, 999)
-        return invoiceDate <= end
-      }
-      
-      return true
-    } catch {
-      return true
-    }
-  }
+    const loadInvoices = useCallback(async () => {
+        if (!company?.$id) return
+        setLoading(true)
+        try {
+            const [res, partiesRes] = await Promise.all([
+                getInvoices(company.$id),
+                getParties(company.$id),
+            ])
+            const map = {}
+                ; (partiesRes.documents || []).forEach((p) => {
+                    map[p.$id] = p.name
+                })
+            setPartyMap(map)
+            setInvoices(res.documents || [])
+        } finally {
+            setLoading(false)
+        }
+    }, [company])
 
-  const filteredInvoices = invoices.filter(inv => {
-    // Search filter
-    const matchesSearch = 
-    inv.invoiceNumber?.toLowerCase().includes(search.toLowerCase()) ||
-    partyMap[inv.partyId]?.name?.toLowerCase().includes(search.toLowerCase())
-    
-    // Status filter
-    const matchesStatus = statusFilter === "all" || inv.status === statusFilter
-    
-    // Date range filter
-    const matchesDateRange = isDateInRange(inv.invoiceDate)
-    
-    return matchesSearch && matchesStatus && matchesDateRange
-  })
+    useEffect(() => {
+        loadInvoices()
+    }, [loadInvoices])
 
-  const handleStatusFilter = (status) => {
-    setStatusFilter(status)
-    setShowStatusDropdown(false)
-  }
+    useEffect(() => {
+        if (!draftFromOrder) return
+        setModalDraft({
+            orderId: draftFromOrder.orderId,
+            partyId: draftFromOrder.partyId,
+            partyName: draftFromOrder.partyName,
+            orderDate: draftFromOrder.orderDate,
+            items: draftFromOrder.items || [],
+            title: draftFromOrder.title || "",
+        })
+        setViewInvoice(null)
+        setOpenModal(true)
+        onDraftConsumed?.()
+    }, [draftFromOrder, onDraftConsumed])
 
-  const handleDateRangeApply = () => {
-    setShowDateRangePicker(false)
-  }
+    useEffect(() => {
+        if (!viewInvoiceIdFromOrder || invoices.length === 0) return
+        const target = invoices.find((inv) => inv.$id === viewInvoiceIdFromOrder)
+        if (!target) return
 
-  const handleDateRangeClear = () => {
-    setDateRangeStart("")
-    setDateRangeEnd("")
-    setShowDateRangePicker(false)
-  }
+        setModalDraft(null)
+        setViewInvoice(target)
+        setOpenModal(true)
+        onViewInvoiceConsumed?.()
+    }, [viewInvoiceIdFromOrder, invoices, onViewInvoiceConsumed])
 
-  const getStatusDisplayName = (status) => {
-    const statusMap = {
-      all: "All",
-      paid: "Paid",
-      pending: "Pending",
-      partial: "Partial",
-      draft: "Draft"
-    }
-    return statusMap[status] || "All"
-  }
+    const rows = useMemo(() => {
+        return invoices
+            .map((inv) => ({
+                ...inv,
+                displayParty: partyMap[inv.partyId] || "—",
+            }))
+            .filter((inv) => {
+                const searchMatch =
+                    !search ||
+                    inv.invoiceNo?.toString().toLowerCase().includes(search.toLowerCase()) ||
+                    inv.displayParty?.toLowerCase().includes(search.toLowerCase())
 
-  const handleCreateInvoice = () => {
-    setShowCreateInvoiceModal(true)
-  }
+                const statusMatch =
+                    !statusFilter ||
+                    (inv.status || "unpaid").toLowerCase() === statusFilter.toLowerCase()
 
-  const handleViewInvoice = (invoice) => {
-    if (onViewInvoice) {
-      onViewInvoice(invoice.$id)
-    }
-  }
-
-  const handleDownloadPDF = async (invoice) => {
-    try {
-      // Get invoice items
-      const itemsRes = await getInvoiceItems(invoice.$id)
-      const invoiceItems = itemsRes.documents
-      
-      // Get party details
-      const party = partyMap[invoice.partyId]
-      
-      // Generate and download PDF
-      await generateInvoicePDF(invoice, invoiceItems, company, party)
-    } catch (error) {
-      console.error("Error downloading PDF:", error)
-      alert("Failed to generate PDF. Please try again.")
-    }
-  }
-
-  // Close dropdowns when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (!event.target.closest('.relative')) {
-        setShowDateRangePicker(false)
-        setShowStatusDropdown(false)
-      }
-    }
-    
-    if (showDateRangePicker || showStatusDropdown) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [showDateRangePicker, showStatusDropdown])
-
-  return (
-    <main className="flex-1 overflow-y-auto flex flex-col bg-background-light">
-
-      {/* HEADER */}
-      <header className="p-8 pb-4">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h2 className="text-3xl font-black tracking-tight">Invoices</h2>
-            <p className="text-[#638288] text-sm mt-1">
-              Efficiently track and manage your outgoing financial transactions.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button className="flex items-center gap-2 px-4 py-2 border border-zinc-200 bg-white rounded-lg text-sm font-bold">
-              <span className="material-symbols-outlined">download</span>
-              Export CSV
-            </button>
-            <button onClick={handleCreateInvoice} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold shadow-md">
-              <span className="material-symbols-outlined">add</span>
-              Create Invoice
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* SEARCH BAR */}
-      <section className="px-8 py-4">
-        <div className="bg-white border border-zinc-200 p-3 rounded-xl shadow-sm flex items-center gap-3">
-          <span className="material-symbols-outlined text-zinc-400">search</span>
-
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search by Invoice # or Customer..."
-            className="w-full bg-transparent border-none focus:ring-0 text-sm"
-          />
-
-          <div className="flex items-center gap-2 relative">
-            <div className="relative">
-              <button 
-                onClick={() => {
-                  setShowStatusDropdown(!showStatusDropdown)
-                  setShowDateRangePicker(false)
-                }}
-                className="flex items-center gap-2 px-3 py-2 bg-zinc-50 rounded-lg text-xs font-semibold text-zinc-600 border border-zinc-100 hover:border-zinc-300 whitespace-nowrap"
-              >
-                Status: {getStatusDisplayName(statusFilter)}
-              <span className="material-symbols-outlined text-sm">expand_more</span>
-            </button>
-
-              {showStatusDropdown && (
-                <div className="absolute top-full right-0 mt-2 bg-white border border-zinc-200 rounded-lg shadow-lg z-20 p-3 min-w-[200px]">
-                  <div className="space-y-2">
-                    <button
-                      onClick={() => handleStatusFilter("all")}
-                      className={`w-full text-left px-3 py-2 rounded text-xs font-semibold ${
-                        statusFilter === "all" ? "bg-primary text-white" : "hover:bg-zinc-50"
-                      }`}
-                    >
-                      All
-                    </button>
-                    <button
-                      onClick={() => handleStatusFilter("paid")}
-                      className={`w-full text-left px-3 py-2 rounded text-xs font-semibold ${
-                        statusFilter === "paid" ? "bg-primary text-white" : "hover:bg-zinc-50"
-                      }`}
-                    >
-                      Paid
-                    </button>
-                    <button
-                      onClick={() => handleStatusFilter("pending")}
-                      className={`w-full text-left px-3 py-2 rounded text-xs font-semibold ${
-                        statusFilter === "pending" ? "bg-primary text-white" : "hover:bg-zinc-50"
-                      }`}
-                    >
-                      Pending
-                    </button>
-                    <button
-                      onClick={() => handleStatusFilter("partial")}
-                      className={`w-full text-left px-3 py-2 rounded text-xs font-semibold ${
-                        statusFilter === "partial" ? "bg-primary text-white" : "hover:bg-zinc-50"
-                      }`}
-                    >
-                      Partial
-                    </button>
-                    <button
-                      onClick={() => handleStatusFilter("draft")}
-                      className={`w-full text-left px-3 py-2 rounded text-xs font-semibold ${
-                        statusFilter === "draft" ? "bg-primary text-white" : "hover:bg-zinc-50"
-                      }`}
-                    >
-                      Draft
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="relative">
-              <button 
-                onClick={() => {
-                  setShowDateRangePicker(!showDateRangePicker)
-                  setShowStatusDropdown(false)
-                }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border whitespace-nowrap ${
-                  dateRangeStart || dateRangeEnd
-                    ? "bg-primary/10 border-primary text-primary"
-                    : "bg-zinc-50 border-zinc-100 hover:border-zinc-300 text-zinc-600"
-                }`}
-              >
-                {dateRangeStart || dateRangeEnd 
-                  ? `${dateRangeStart ? formatDate(dateRangeStart) : "..."} - ${dateRangeEnd ? formatDate(dateRangeEnd) : "..."}`
-                  : "Date Range"
+                let dateMatch = true
+                if (fromDate) {
+                    dateMatch =
+                        dateMatch &&
+                        new Date(inv.date) >= new Date(fromDate)
                 }
-              <span className="material-symbols-outlined text-sm">calendar_month</span>
-            </button>
-              
-              {showDateRangePicker && (
-                <div className="absolute top-full right-0 mt-2 bg-white border border-zinc-200 rounded-lg shadow-lg z-20 p-4 min-w-[300px]">
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-zinc-700 mb-1">Start Date</label>
-                      <input
-                        type="date"
-                        value={dateRangeStart}
-                        onChange={(e) => setDateRangeStart(e.target.value)}
-                        className="w-full px-3 py-2 border border-zinc-200 rounded-lg text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-zinc-700 mb-1">End Date</label>
-                      <input
-                        type="date"
-                        value={dateRangeEnd}
-                        onChange={(e) => setDateRangeEnd(e.target.value)}
-                        className="w-full px-3 py-2 border border-zinc-200 rounded-lg text-sm"
-                      />
-                    </div>
-                    <div className="flex gap-2 pt-2">
-                      <button
-                        onClick={handleDateRangeApply}
-                        className="flex-1 px-3 py-2 bg-primary text-white rounded-lg text-xs font-semibold hover:bg-primary/90"
-                      >
-                        Apply
-                      </button>
-                      <button
-                        onClick={handleDateRangeClear}
-                        className="px-3 py-2 bg-zinc-100 text-zinc-600 rounded-lg text-xs font-semibold hover:bg-zinc-200"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
+                if (toDate) {
+                    const to = new Date(toDate)
+                    to.setHours(23, 59, 59, 999)
+                    dateMatch =
+                        dateMatch &&
+                        new Date(inv.date) <= to
+                }
+
+                return searchMatch && statusMatch && dateMatch
+            })
+    }, [invoices, partyMap, search, statusFilter, fromDate, toDate])
+
+    useEffect(() => {
+        setCurrentPage(1)
+    }, [search, statusFilter, fromDate, toDate])
+
+    const totalPages = Math.ceil(rows.length / itemsPerPage)
+    const startIndex = (currentPage - 1) * itemsPerPage
+    const endIndex = startIndex + itemsPerPage
+    const paginatedRows = rows.slice(startIndex, endIndex)
+
+    const startEntry = rows.length === 0 ? 0 : startIndex + 1
+    const endEntry = Math.min(endIndex, rows.length)
+
+    const handlePreviousPage = () => {
+        if (currentPage > 1) setCurrentPage(currentPage - 1)
+    }
+
+    const handleNextPage = () => {
+        if (currentPage < totalPages) setCurrentPage(currentPage + 1)
+    }
+
+    const getPageNumbers = () => {
+        const pages = []
+        const maxVisiblePages = 5
+
+        if (totalPages <= maxVisiblePages) {
+            for (let i = 1; i <= totalPages; i++) pages.push(i)
+        } else {
+            if (currentPage <= 3) {
+                for (let i = 1; i <= 4; i++) pages.push(i)
+                pages.push("...")
+                pages.push(totalPages)
+            } else if (currentPage >= totalPages - 2) {
+                pages.push(1)
+                pages.push("...")
+                for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i)
+            } else {
+                pages.push(1)
+                pages.push("...")
+                for (let i = currentPage - 1; i <= currentPage + 1; i++)
+                    pages.push(i)
+                pages.push("...")
+                pages.push(totalPages)
+            }
+        }
+
+        return pages
+    }
+
+    const getStatusBadge = (status) => {
+        switch (status) {
+            case "paid":
+                return "bg-green-100 text-green-600"
+            case "partial":
+                return "bg-blue-100 text-blue-600"
+            case "cancelled":
+                return "bg-gray-100 text-gray-600"
+            default:
+                return "bg-yellow-100 text-yellow-600"
+        }
+    }
+
+    const handleCreate = async (data) => {
+        const inv = await createInvoice({ ...data, companyId: company.$id })
+        if (data.orderId) {
+            await updateOrderInvoiceId(data.orderId, inv.$id)
+        }
+        await loadInvoices()
+    }
+
+    const handleExport = () => {
+        if (!rows || rows.length === 0) {
+            alert("No data to export")
+            return
+        }
+
+        const formatted = rows.map((inv, index) => ({
+            "Sr No": index + 1,
+            "Invoice No": inv.invoiceNo,
+            "Company Id": inv.companyId,
+            "Party Id": inv.partyId,
+            "Order Id": inv.orderId || "",
+            "Items": JSON.stringify(inv.items || []),
+            "Total Amount": inv.totalAmount ?? 0,
+            "Paid Amount": inv.paidAmount ?? 0,
+            "Status": inv.status || "unpaid",
+            "Date": inv.date || "",
+            "Created At": inv.created_at || "",
+        }))
+
+        exportToXLSX(
+            formatted,
+            `Invoices_${new Date().toISOString().split("T")[0]}`,
+            "Invoices"
+        )
+    }
+
+    const normalizeHeader = (v) =>
+        String(v ?? "")
+            .toLowerCase()
+            .replace(/[\s_]+/g, "")
+            .replace(/[^a-z0-9]/g, "")
+
+    const getCellByHeaders = (row, expectedLabels) => {
+        const keys = Object.keys(row || {})
+        const expected = expectedLabels.map(normalizeHeader)
+
+        for (const key of keys) {
+            const nk = normalizeHeader(key)
+            if (expected.includes(nk)) return row?.[key]
+        }
+
+        return ""
+    }
+
+
+    const handleCancelInvoice = async (inv) => {
+        if (!inv?.$id) return
+        if (String(inv.status || "").toLowerCase() === "cancelled") return
+
+        const ok = window.confirm(`Cancel invoice #${inv.invoiceNo}?`)
+        if (!ok) return
+
+        await updateInvoice(inv.$id, {
+            companyId: company.$id,
+            invoiceNo: inv.invoiceNo,
+            date: inv.date,
+            partyId: inv.partyId,
+            orderId: inv.orderId,
+            items: inv.items,
+            totalAmount: inv.totalAmount,
+            paidAmount: inv.paidAmount,
+            status: "cancelled",
+        })
+        await loadInvoices()
+    }
+
+    const closeModal = () => {
+        setOpenModal(false)
+        setModalDraft(null)
+        setViewInvoice(null)
+    }
+
+    return (
+        <main className="flex-1 flex flex-col overflow-hidden">
+            <header className="bg-white border-b border-[#dae5e7] p-6 flex justify-between items-end">
+                <div>
+                    <h1 className="text-2xl font-bold">Invoices</h1>
+                    <p className="text-sm text-gray-500">
+                        Manage and track all invoices
+                    </p>
                 </div>
-              )}
+
+                <button
+                    type="button"
+                    onClick={() => {
+                        setViewInvoice(null)
+                        setModalDraft(null)
+                        setOpenModal(true)
+                    }}
+                    className="px-4 py-2 bg-primary text-white rounded-lg font-semibold"
+                >
+                    + Create Invoice
+                </button>
+            </header>
+
+            <div className="bg-white px-6 py-4 flex flex-col md:flex-row gap-4 justify-between border-b border-[#dae5e7]">
+                <div className="relative w-full md:w-96">
+                    <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[#5e878d]">
+                        search
+                    </span>
+                    <input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search by invoice no or party…"
+                        className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-[#f0f4f5] text-sm focus:ring-2 focus:ring-primary/50 outline-none"
+                    />
+                </div>
+
+                <div className="flex gap-3">
+                    <button
+                        type="button"
+                        onClick={() => setIsFilterOpen((v) => !v)}
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-[#dae5e7] bg-white text-sm font-semibold"
+                    >
+                        <span className="material-symbols-outlined">filter_list</span>
+                        Filter
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={handleExport}
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-[#dae5e7] bg-white text-sm font-semibold"
+                    >
+                        <span className="material-symbols-outlined">file_download</span>
+                        Export
+                    </button>
+                </div>
             </div>
 
-            <div className="w-px h-6 bg-zinc-200 mx-1"></div>
+            {isFilterOpen ? (
+                <div className="bg-white px-6 pb-4 flex flex-wrap gap-4 items-end border-b border-[#dae5e7]">
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="date"
+                            value={fromDate}
+                            onChange={(e) => setFromDate(e.target.value)}
+                            className="px-3 py-2 rounded-lg border border-[#dae5e7] text-sm bg-white"
+                        />
+                        <span className="text-gray-400 text-sm">to</span>
+                        <input
+                            type="date"
+                            value={toDate}
+                            onChange={(e) => setToDate(e.target.value)}
+                            className="px-3 py-2 rounded-lg border border-[#dae5e7] text-sm bg-white"
+                        />
+                    </div>
 
-            <button className="p-2 text-zinc-500 hover:bg-zinc-100 rounded-lg transition-colors">
-              <span className="material-symbols-outlined">filter_list</span>
-            </button>
-          </div>
-        </div>
-      </section>
+                    <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                        className="px-3 py-2 rounded-lg border border-[#dae5e7] text-sm bg-white"
+                    >
+                        <option value="">All statuses</option>
+                        <option value="paid">Paid</option>
+                        <option value="partial">Partial</option>
+                        <option value="unpaid">Unpaid</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
 
-      <section className="px-8 pb-4 flex gap-2 overflow-x-auto no-scrollbar">
-        <button 
-          onClick={() => handleStatusFilter("all")}
-          className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
-            statusFilter === "all"
-              ? "bg-primary text-white"
-              : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
-          }`}
-        >
-          All Invoices
-        </button>
-
-        <button 
-          onClick={() => handleStatusFilter("paid")}
-          className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
-            statusFilter === "paid"
-              ? "bg-primary text-white"
-              : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
-          }`}
-        >
-          Paid
-        </button>
-
-        <button 
-          onClick={() => handleStatusFilter("pending")}
-          className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
-            statusFilter === "pending"
-              ? "bg-primary text-white"
-              : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
-          }`}
-        >
-          Pending
-        </button>
-
-        <button 
-          onClick={() => handleStatusFilter("partial")}
-          className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
-            statusFilter === "partial"
-              ? "bg-primary text-white"
-              : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
-          }`}
-        >
-          Partial
-        </button>
-
-        <button 
-          onClick={() => handleStatusFilter("draft")}
-          className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
-            statusFilter === "draft"
-              ? "bg-primary text-white"
-              : "bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
-          }`}
-        >
-          Draft
-        </button>
-      </section>
-
-
-
-      {/* TABLE */}
-      <section className="px-8 pb-8 flex-1">
-        <div className="bg-white border border-zinc-200 rounded-xl shadow-md overflow-hidden flex flex-col h-full">
-
-          <div className="flex-1 overflow-auto">
-            <table className="w-full text-left border-collapse">
-              <thead className="sticky top-0 bg-zinc-50 border-b border-zinc-200 z-10">
-                <tr>
-                  <th className="px-6 py-4 text-xs font-bold text-zinc-500 uppercase w-[140px]">
-                    Invoice #
-                  </th>
-                  <th className="px-6 py-4 text-xs font-bold text-zinc-500 uppercase">
-                    Date
-                  </th>
-                  <th className="px-6 py-4 text-xs font-bold text-zinc-500 uppercase">
-                    Customer (Party)
-                  </th>
-                  <th className="px-6 py-4 text-xs font-bold text-zinc-500 uppercase">
-                    Order No
-                  </th>
-                  <th className="px-6 py-4 text-xs font-bold text-zinc-500 uppercase text-right">
-                    Amount
-                  </th>
-                  <th className="px-6 py-4 text-xs font-bold text-zinc-500 uppercase text-right">
-                    Paid
-                  </th>
-                  <th className="px-6 py-4 text-xs font-bold text-zinc-500 uppercase text-center">
-                    Status
-                  </th>
-                  <th className="px-6 py-4 text-xs font-bold text-zinc-500 uppercase text-right">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-zinc-100">
-                {filteredInvoices.length === 0 && (
-                  <tr>
-                    <td colSpan="6" className="px-6 py-10 text-center text-sm text-zinc-500">
-                      No invoices found
-                    </td>
-                  </tr>
-                )}
-
-                {filteredInvoices.map(inv => (
-                  <tr key={inv.$id} className="hover:bg-zinc-50 transition-colors group">
-                    <td className="px-6 py-4 text-sm font-bold text-primary whitespace-nowrap">
-                      {inv.invoiceNumber}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-zinc-600">
-                      {formatDate(inv.invoiceDate)}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-medium">
-                      {partyMap[inv.partyId]?.name || "Unknown"}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-bold text-right">
-                      {inv.orderNo}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-bold text-right">
-                      ₹{inv.grandTotal?.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-bold text-right">
-                      ₹{inv.paidAmount?.toFixed(2) || 0}
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <span
-                        className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold ${STATUS_STYLES[inv.status] || STATUS_STYLES.pending
-                          }`}
-                      >
-                        {inv.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end gap-3">
-                        <button onClick={() => handleViewInvoice(inv)} className="text-primary text-xs font-bold hover:underline">
-                          View
-                        </button>
-                        <button 
-                          onClick={() => handleDownloadPDF(inv)}
-                          className="p-1.5 text-zinc-400 hover:text-zinc-600 rounded-md"
-                          title="Download PDF"
+                    {(search || statusFilter || fromDate || toDate) && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSearch("")
+                                setStatusFilter("")
+                                setFromDate("")
+                                setToDate("")
+                            }}
+                            className="flex items-center gap-1 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg border border-red-100"
                         >
-                          <span className="material-symbols-outlined text-[18px]">
-                            picture_as_pdf
-                          </span>
+                            <span className="material-symbols-outlined text-sm">close</span>
+                            Clear
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    )}
+                </div>
+            ) : null}
 
-          {/* PAGINATION FOOTER (STATIC STYLE) */}
-          <div className="p-4 border-t border-zinc-100 bg-zinc-50 flex items-center justify-between">
-            <p className="text-xs text-zinc-500 font-medium">
-              Showing <b>1 {filteredInvoices.length}</b> of <b>{filteredInvoices.length}</b> invoices
-            </p>
-            <div className="flex gap-1">
-              <button className="p-1 px-3 border border-zinc-200 rounded-lg text-xs font-bold bg-white">
-                Previous
-              </button>
-              <button className="p-1 px-3 border border-primary text-primary rounded-lg text-xs font-bold bg-primary/10">
-                1
-              </button>
-              <button className="p-1 px-3 border border-zinc-200 rounded-lg text-xs font-bold bg-white">
-                Next
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
+            <section className="flex-1 overflow-auto p-6">
+                <div className="bg-white rounded-xl border border-[#dae5e7] overflow-hidden">
+                    <table className="w-full text-left">
+                        <thead className="bg-gray-100">
+                            <tr>
+                                <th className="px-4 py-3 text-xs uppercase">Invoice No</th>
+                                <th className="px-4 py-3 text-xs uppercase">Date</th>
+                                <th className="px-4 py-3 text-xs uppercase">Party</th>
+                                <th className="px-4 py-3 text-xs uppercase">Amount</th>
+                                <th className="px-4 py-3 text-xs uppercase">Paid</th>
+                                <th className="px-4 py-3 text-xs uppercase">Status</th>
+                                <th className="px-4 py-3 text-xs uppercase text-right">
+                                    Actions
+                                </th>
+                            </tr>
+                        </thead>
 
-      <CreateInvoiceModal
-        open={showCreateInvoiceModal}
-        onClose={() => setShowCreateInvoiceModal(false)}
-        company={company}
-        onInvoiceCreated={async () => {
-          const invoiceRes = await listInvoices(company.$id)
-          setInvoices(invoiceRes.documents)
-        }}
-      />
-    </main>
-  )
+                        <tbody>
+                            {loading ? (
+                                <tr>
+                                    <td
+                                        colSpan="7"
+                                        className="text-center py-6 text-gray-500"
+                                    >
+                                        Loading invoices...
+                                    </td>
+                                </tr>
+                            ) : rows.length === 0 ? (
+                                <tr>
+                                    <td
+                                        colSpan="7"
+                                        className="text-center py-6 text-gray-500"
+                                    >
+                                        No invoices found
+                                    </td>
+                                </tr>
+                            ) : (
+                                paginatedRows.map((inv) => (
+                                    <tr key={inv.$id} className="border-t border-[#dae5e7]">
+                                        <td className="px-4 py-3 font-medium">
+                                            #{inv.invoiceNo}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {inv.date
+                                                ? new Date(inv.date).toLocaleDateString("en-IN")
+                                                : "—"}
+                                        </td>
+                                        <td className="px-4 py-3">{inv.displayParty}</td>
+                                        <td className="px-4 py-3">₹{inv.totalAmount}</td>
+                                        <td className="px-4 py-3">₹{inv.paidAmount || 0}</td>
+                                        <td className="px-4 py-3">
+                                            <span
+                                                className={`px-2 py-1 text-xs rounded-full font-semibold ${getStatusBadge(
+                                                    inv.status
+                                                )}`}
+                                            >
+                                                {inv.status || "unpaid"}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-right">
+                                            <div className="flex justify-end gap-2 flex-wrap">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setModalDraft(null)
+                                                        setViewInvoice(inv)
+                                                        setOpenModal(true)
+                                                    }}
+                                                    className="px-3 py-1.5 text-xs border border-[#dae5e7] rounded-lg hover:bg-gray-50"
+                                                >
+                                                    View
+                                                </button>
+                                                {String(inv.status || "").toLowerCase() !== "cancelled" ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleCancelInvoice(inv)}
+                                                        className="px-3 py-1.5 text-xs border border-red-200 text-red-700 rounded-lg hover:bg-red-50"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                ) : null}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+
+                    {/* PAGINATION FOOTER */}
+                    {rows.length > 0 && totalPages > 1 ? (
+                        <div className="px-6 py-4 bg-[#f0f4f5]/30 flex items-center justify-between border-t border-[#dae5e7]">
+                            <p className="text-xs text-[#5e878d] font-medium">
+                                Showing {startEntry} to {endEntry} of {rows.length} entries
+                            </p>
+
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={handlePreviousPage}
+                                    disabled={currentPage === 1}
+                                    className="p-1.5 rounded bg-white border border-[#dae5e7] text-[#5e878d] hover:bg-primary/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <span className="material-symbols-outlined text-sm">
+                                        chevron_left
+                                    </span>
+                                </button>
+
+                                {getPageNumbers().map((page, idx) => {
+                                    if (page === "...") {
+                                        return (
+                                            <span
+                                                key={`ellipsis-${idx}`}
+                                                className="w-8 h-8 flex items-center justify-center text-[#5e878d] text-xs"
+                                            >
+                                                ...
+                                            </span>
+                                        )
+                                    }
+
+                                    return (
+                                        <button
+                                            key={page}
+                                            onClick={() => setCurrentPage(page)}
+                                            className={`w-8 h-8 rounded text-xs font-bold transition-colors ${currentPage === page
+                                                ? "bg-primary text-white"
+                                                : "bg-white text-[#5e878d] hover:bg-primary/5"
+                                                }`}
+                                        >
+                                            {page}
+                                        </button>
+                                    )
+                                })}
+
+                                <button
+                                    onClick={handleNextPage}
+                                    disabled={currentPage === totalPages}
+                                    className="p-1.5 rounded bg-white border border-[#dae5e7] text-[#5e878d] hover:bg-primary/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <span className="material-symbols-outlined text-sm">
+                                        chevron_right
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="px-6 py-4 bg-[#f0f4f5]/30 flex items-center justify-between border-t border-[#dae5e7]">
+                            <p className="text-xs text-[#5e878d] font-medium">
+                                Showing {rows.length === 0 ? 0 : 1} to {rows.length} of {rows.length} entries
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </section>
+
+
+            <InvoiceModal
+                mode={viewInvoice ? "view" : "create"}
+                open={openModal}
+                onClose={closeModal}
+                onCreate={handleCreate}
+                company={company}
+                initialDraft={modalDraft}
+                editInvoice={viewInvoice}
+            />
+        </main>
+    )
 }

@@ -7,13 +7,23 @@ const {
 // GET
 const getPartiesController = async (req, res) => {
     try {
-        const companyId = req.user.companyId;
+        const companyId = req.companyId;
 
-        const parties = await getParties(companyId);
+        const limit = parseInt(req.query.limit) || 20;
+        const page = parseInt(req.query.page) || 1;
+        const offset = (page - 1) * limit;
+
+        const parties = await getParties(companyId, limit, offset);
 
         res.json({
             success: true,
-            data: parties,
+            data: parties.rows,
+            pagination: {
+                total: parties.total,
+                page,
+                limit,
+                totalPages: Math.ceil(parties.total / limit),
+            },
         });
     } catch (err) {
         console.error(err);
@@ -27,7 +37,7 @@ const getPartiesController = async (req, res) => {
 // CREATE
 const createPartyController = async (req, res) => {
     try {
-        const companyId = req.user.companyId;
+        const companyId = req.companyId;
 
         const party = await createParty({
             ...req.body,

@@ -9,7 +9,7 @@ const {
 // GET ALL
 const getDynamicPricesController = async (req, res) => {
     try {
-        const companyId = req.user.companyId;
+        const companyId = req.companyId;
 
         const data = await getDynamicPrices(companyId);
 
@@ -23,7 +23,7 @@ const getDynamicPricesController = async (req, res) => {
 // GET FOR PARTY
 const getDynamicPricesForPartyController = async (req, res) => {
     try {
-        const companyId = req.user.companyId;
+        const companyId = req.companyId;
         const { partyId } = req.params;
 
         const data = await getDynamicPricesForParty(companyId, partyId);
@@ -38,7 +38,7 @@ const getDynamicPricesForPartyController = async (req, res) => {
 // UPSERT
 const upsertDynamicPriceController = async (req, res) => {
     try {
-        const companyId = req.user.companyId;
+        const companyId = req.companyId;
 
         const { partyId, productId, price } = req.body;
 
@@ -59,7 +59,7 @@ const upsertDynamicPriceController = async (req, res) => {
 // DELETE
 const deleteDynamicPriceController = async (req, res) => {
     try {
-        const companyId = req.user.companyId;
+        const companyId = req.companyId;
         const { partyId, productId } = req.body;
 
         await deleteDynamicPrice(companyId, partyId, productId);

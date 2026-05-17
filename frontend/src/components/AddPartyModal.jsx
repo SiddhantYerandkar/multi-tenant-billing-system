@@ -4,6 +4,8 @@ export default function AddPartyModal({ isOpen, onClose, onAddParty, partyCode }
   const [name, setName] = useState("")
   const [phone, setPhone] = useState("")
   const [address, setAddress] = useState("")
+  const [openingBalance, setOpeningBalance] = useState("")
+  const [balanceType, setBalanceType] = useState("DR")
   const [loading, setLoading] = useState(false)
 
   // Prevent background scroll
@@ -19,6 +21,8 @@ export default function AddPartyModal({ isOpen, onClose, onAddParty, partyCode }
       setPhone("")
       setAddress("")
       setLoading(false)
+      setOpeningBalance("")
+      setBalanceType("DR")
     }
   }, [isOpen])
 
@@ -34,6 +38,9 @@ export default function AddPartyModal({ isOpen, onClose, onAddParty, partyCode }
         phone: phone.trim(),
         address: address.trim(),
         isActive: true,
+
+        openingBalance: parseFloat(openingBalance) || 0,
+        balanceType: openingBalance ? balanceType : null
       })
       onClose()
     } finally {
@@ -121,6 +128,47 @@ export default function AddPartyModal({ isOpen, onClose, onAddParty, partyCode }
               </div>
             </label>
 
+            {/* Opening Balance if its present */}
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-semibold">Opening Balance</span>
+              <div className="relative group">
+                <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-[#5e878d] group-focus-within:text-primary">
+                  currency_rupee
+                </span>
+                <input
+                  type="number"
+                  value={openingBalance}
+                  onChange={(e) => setOpeningBalance(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full h-12 pl-12 pr-4 rounded-lg border border-[#dae5e7] focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                />
+              </div>
+
+              <div className="flex items-center gap-4 mt-2">
+                <label className="flex items-center gap-2">
+                  <input type="radio"
+                    name="balanceType"
+                    value="DR"
+                    checked={balanceType === "DR"}
+                    onChange={() => setBalanceType("DR")}
+                    className="accent-primary"
+                  />
+                  <span className="text-sm font-medium">DR</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="radio"
+                    name="balanceType"
+                    value="CR"
+                    className="accent-primary"
+                    checked={balanceType === "CR"}
+                    onChange={() => setBalanceType("CR")}
+                  />
+                  <span className="text-sm font-medium">CR</span>
+                </label>
+              </div>
+            </label>
+
+
             {/* Address */}
             <label className="flex flex-col gap-2">
               <span className="text-sm font-semibold">Address</span>
@@ -136,6 +184,7 @@ export default function AddPartyModal({ isOpen, onClose, onAddParty, partyCode }
                 />
               </div>
             </label>
+
           </div>
         </div>
 

@@ -1,23 +1,84 @@
-import { databases } from "./appwrite"
-import { ID, Query } from "appwrite"
+const API_URL = import.meta.env.VITE_API_URL
 
-const DB_ID = "billing_db"
-const COLLECTION = "products"
-
-export function getProducts(companyId) {
-    return databases.listDocuments(DB_ID, COLLECTION, [
-        Query.equal("companyId", companyId),
-    ])
+function getToken() {
+    return localStorage.getItem("token")
 }
 
-export function addProduct(data) {
-    return databases.createDocument(DB_ID, COLLECTION, ID.unique(), data)
+export async function getProducts() {
+    const res = await fetch(`${API_URL}/products`, {
+        method: "GET",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${getToken()}`,
+            "x-company-id": localStorage.getItem("companyId")
+        }
+    })
+    const data = await res.json()
+
+    if (!res.ok) {
+        throw new Error(data.message || "Failed to fetch products")
+    }
+
+    return data
 }
 
-export function updateProduct(id, data) {
-    return databases.updateDocument(DB_ID, COLLECTION, id, data)
+export async function addProduct(payload) {
+
+    const res = await fetch(`${API_URL}/products`, {
+        method: 'POST',
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${getToken()}`,
+            "x-company-id": localStorage.getItem("companyId")
+        },
+        body: JSON.stringify(payload)
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+        throw new Error(data.message || "Failed to create product")
+    }
+
+    return data
+
 }
 
-export function deleteProduct(id) {
-    return databases.deleteDocument(DB_ID, COLLECTION, id)
+export async function updateProduct(id, data) {
+    const res = await fetch(`${API_URL}/products/${id}`, {
+        method: 'PUT',
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${getToken()}`,
+            "x-company-id": localStorage.getItem("companyId")
+        },
+        body: JSON.stringify(data)
+    })
+
+    const updatedData = await res.json()
+
+    if (!res.ok) {
+        throw new Error(updatedData.message || "Failed to update product")
+    }
+
+    return updatedData
+}
+
+export async function deleteProduct(id) {
+    console.log("Deleting product with id:", id); // Debug log
+    const res = await fetch(`${API_URL}/products/${id}`, {
+        method: 'DELETE',
+        headers: {
+            "Authorization": `Bearer ${getToken()}`,
+            "x-company-id": localStorage.getItem("companyId")
+        }
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+        throw new Error(data.message || "Failed to delete product")
+    }
+
+    return data
 }

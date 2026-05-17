@@ -1,98 +1,91 @@
-import { databases, storage } from "./appwrite"
-import { ID } from "appwrite"
+const API_URL = import.meta.env.VITE_API_URL
 
-const DB_ID = "billing_db"
-const COMPANY_COLLECTION = "companies"
-const BUCKET_ID = "company_logos"
-
-export async function createCompany(data, logoFile, userId) {
-    let logoUrl = null
-
-    // Try uploading logo; if it fails, continue without blocking company creation.
-    if (logoFile) {
-        try {
-            const upload = await storage.createFile(
-                BUCKET_ID,
-                ID.unique(),
-                logoFile
-            )
-            // Store the view URL instead of file ID
-            logoUrl = storage.getFileView(BUCKET_ID, upload.$id)
-        } catch (err) {
-            console.error("Logo upload failed, continuing without logo:", err)
-        }
-    }
-
-    const payload = {
-        ...data,
-        ownerId: userId,
-    }
-
-    // Only include logo URL if upload succeeded
-    if (logoUrl) {
-        payload.logoUrl = logoUrl
-    }
-
-    return databases.createDocument(
-        DB_ID,
-        COMPANY_COLLECTION,
-        ID.unique(),
-        payload
-    )
+function getToken() {
+    return localStorage.getItem("token")
 }
 
-export function getCompany(companyId) {
-    return databases.getDocument(DB_ID, COMPANY_COLLECTION, companyId)
+export async function getMyCompany() {
+    const token = getToken()
+    console.log("Fetching my company with token:", token)
+    const res = await fetch(`${API_URL}/companies/my`, {
+        method: "GET",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+        },
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+        throw new Error(data.message || "Failed to fetch company")
+    }
+    console.log("Fetched company data:", data)
+    localStorage.setItem("companyId", data.data.id)
+    return data
 }
 
-export async function updateCompany(companyId, data, logoFile, qrCodeFile) {
-    let logoUrl = null
-    let qrCodeUrl = null
+// 🔥 Create Company
+export async function createCompany(data, logoFile, qrFile, userId) {
+    const formData = new FormData()
 
-    // Upload new logo if provided
-    if (logoFile) {
-        try {
-            const upload = await storage.createFile(
-                BUCKET_ID,
-                ID.unique(),
-                logoFile
-            )
-            // Store the view URL instead of file ID
-            logoUrl = storage.getFileView(BUCKET_ID, upload.$id)
-        } catch (err) {
-            console.error("Logo upload failed:", err)
-        }
-    }
+    Object.keys(data).forEach((key) => {
+        formData.append(key, data[key])
+    })
 
-    // Upload new QR code if provided
-    if (qrCodeFile) {
-        try {
-            const upload = await storage.createFile(
-                BUCKET_ID,
-                ID.unique(),
-                qrCodeFile
-            )
-            // Store the view URL instead of file ID
-            qrCodeUrl = storage.getFileView(BUCKET_ID, upload.$id)
-        } catch (err) {
-            console.error("QR code upload failed:", err)
-        }
-    }
+    formData.append("ownerId", userId)
 
-    const payload = { ...data }
+    if (logoFile) formData.append("logo", logoFile)
+    if (qrFile) formData.append("qr", qrFile)
 
-    // Include logo URL if upload succeeded
-    if (logoUrl) {
-        payload.logoUrl = logoUrl
-    }
+    const res = await fetch(`${API_URL}/companies/create`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${getToken()}`
+        },
+        body: formData
+    })
 
-    // Include QR code URL if upload succeeded
-    if (qrCodeUrl) {
-        payload.qrCodeUrl = qrCodeUrl
-    }
+    const dataRes = await res.json()
 
-    return databases.updateDocument(DB_ID, COMPANY_COLLECTION, companyId, payload)
+    if (!res.ok) throw new Error(dataRes.message || "Failed to create company")
+
+    return dataRes
 }
 
-// Note: Logo and QR code URLs are now stored directly in the company document
-// No need for helper functions to convert IDs to URLs
+// 🔥 Update Company
+export async function updateCompany(companyId, data, logoFile, qrFile) {
+    const formData = new FormData()
+
+    Object.keys(data).forEach((key) => {
+        formData.append(key, data[key])
+    })
+
+    if (logoFile) formData.append("logo", logoFile)
+    if (qrFile) formData.append("qr", qrFile)
+
+    const res = await fetch(`${API_URL}/companies/${companyId}`, {
+        method: "PUT",
+        headers: {
+            Authorization: `Bearer ${getToken()}`,
+        },
+        body: formData,
+    })
+
+    if (!res.ok) throw new Error("Failed to update company")
+
+    return res.json()
+}
+
+// 🔥 Get company by id (optional admin use)
+export async function getCompany(companyId) {
+    const res = await fetch(`${API_URL}/companies/${companyId}`, {
+        headers: {
+            Authorization: `Bearer ${getToken()}`,
+        },
+    })
+
+    if (!res.ok) throw new Error("Failed to fetch company")
+
+    return res.json()
+}

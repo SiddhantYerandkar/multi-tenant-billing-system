@@ -38,46 +38,26 @@ export default function Sidebar({ page, setPage, outstandingCount = 0 }) {
             <NavItem page={page} setPage={setPage} id="products" icon="package_2" label="Products" />
             <NavItem page={page} setPage={setPage} id="parties" icon="groups" label="Parties" />
             <NavItem page={page} setPage={setPage} id="pricing" icon="currency_rupee" label="Custom Pricing" />
+            <NavItem page={page} setPage={setPage} id="designer" icon="brush" label="Designer" />
           </Section>
 
-          {/* OPERATIONS */}
           <Section
             title="Operations"
             open={openSections.operations}
             toggle={() => toggle("operations")}
           >
+            <NavItem page={page} setPage={setPage} id="designing" icon="package_2" label="Designing Job" />
             <NavItem page={page} setPage={setPage} id="orders" icon="shopping_cart" label="Orders" />
-            <NavItem page={page} setPage={setPage} id="jobs" icon="work" label="Jobs" />
-            <NavItem page={page} setPage={setPage} id="purchases" icon="shopping_cart" label="Purchases" />
-            <NavItem page={page} setPage={setPage} id="expenses" icon="payments" label="Expenses" />
-            <NavItem page={page} setPage={setPage} id="suppliers" icon="local_shipping" label="Suppliers" />
           </Section>
 
-          {/* BILLING */}
           <Section
             title="Billing"
             open={openSections.billing}
             toggle={() => toggle("billing")}
           >
             <NavItem page={page} setPage={setPage} id="invoices" icon="receipt_long" label="Invoices" />
-            <NavItem
-              page={page}
-              setPage={setPage}
-              id="outstanding"
-              icon="account_balance_wallet"
-              label="Outstanding"
-              badge={outstandingCount}
-            />
-            <NavItem page={page} setPage={setPage} id="profitloss" icon="assessment" label="Profit & Loss" />
-          </Section>
-
-          {/* REPORTS */}
-          <Section
-            title="Reports"
-            open={openSections.reports !== undefined ? openSections.reports : true}
-            toggle={() => toggle("reports")}
-          >
-            <NavItem page={page} setPage={setPage} id="reports" icon="description" label="Reports" />
+            <NavItem page={page} setPage={setPage} id="transactions" icon="payments" label="Transactions" />
+            <NavItem page={page} setPage={setPage} id="expenses" icon="wallet" label="Expenses" />
           </Section>
 
         </nav>
